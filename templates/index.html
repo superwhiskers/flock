@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}index{% endblock %}
+
+{% block body %}
+  <h1>flock</h1>
+
+  {% match account %}
+    {% when Some with (account) %}
+      logged in as {{ account.id }}
+
+      <a href="/logout">log out</a><br/>
+
+      <h2>your feed</h2>
+
+      {% for link in account.links %}
+        {% if !link.rated %}
+          {% if link.visited %}
+            <a href="/links/{{ link.id }}/like">like</a>
+            <a href="/links/{{ link.id }}/dislike">dislike</a>
+            <a href="/links/{{ link.id }}/edit">edit</a>
+          {% endif %}
+
+          <a href="/links/{{ link.id }}">{{ link.description }}</a><br/>
+        {% endif %}
+      {% endfor %}
+    {% when None %}
+      <a href="/login">log in</a><br/>
+      <a href="/signup">sign up</a><br/>
+  {% endmatch %}
+
+  <a href="/tags">current tags</a><br/>
+  <a href="/post">post a link</a>
+{% endblock %}

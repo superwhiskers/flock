@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}edit-link{% endblock %}
+
+{% block body %}
+  <h1>edit a link on flock</h1>
+
+  <form method="post" action="/links/{{ id }}/edit">
+    <label>description: <input type="text" name="description" value="{{ description }}"/></label><br/>
+    <label>tags (comma-delimited): <input type="text" name="tags" value="{{ tags }}"/></label><br/>
+    <button>submit</button><br/>
+  </form>
+
+  a list of tags is available <a href="/tags">here</a>
+{% endblock %}

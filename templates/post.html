@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}post{% endblock %}
+
+{% block body %}
+  <h1>make a post on flock</h1>
+
+  <form method="post" action="/post">
+    <label>link: <input type="text" name="link"/></label><br/>
+    <label>description: <input type="text" name="description"/></label><br/>
+    <label>tags (comma-delimited): <input type="text" name="tags"/></label><br/>
+    <button>submit</button><br/>
+  </form>
+
+  a list of tags is available <a href="/tags">here</a>
+{% endblock %}
