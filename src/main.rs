@@ -46,13 +46,14 @@
 #![feature(option_result_contains)]
 #![feature(once_cell)]
 #![feature(let_chains)]
+#![feature(int_roundings)]
 
 mod configuration;
+mod feed;
 mod model;
 mod routes;
 mod templates;
 mod util;
-mod feed;
 
 use anyhow::Context;
 use axum::{extract::Extension, routing::get, Router};

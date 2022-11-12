@@ -17,20 +17,21 @@
 //
 
 use axum::http::StatusCode;
-use instant_glicko_2::{algorithm as glicko_2, constants as glicko_2_constants, Parameters};
+use pcg_rand::Pcg64;
+use rand::{seq::SliceRandom, SeedableRng};
 use sqlx::{pool::PoolConnection, Sqlite};
-use std::{
-    collections::HashSet,
-    time::{Duration, SystemTime},
+use std::collections::{HashMap, HashSet};
+
+use crate::{
+    model,
+    util::{self, ScaledRatingData, ScaledRatingWrapper},
 };
 
-use crate::model;
-
-//TODO(superwhiskers): put feed stuff here
+//TODO(superwhiskers): this is all pretty suboptimal. pass over it and optimize it
 pub async fn generate_feed(
     mut connection: PoolConnection<Sqlite>,
-    account_id: String,
-) -> Result<[String; 10], (StatusCode, &'static str)> {
+    account_id: &str,
+) -> Result<Vec<String>, (StatusCode, &'static str)> {
     let mut candidates: HashSet<String> = HashSet::new();
 
     for tag in sqlx::query_scalar!(
@@ -90,7 +91,7 @@ pub async fn generate_feed(
         )
     })?;
 
-    //TODO(superwhiskers): pull this out into a function
+    //TODO(superwhiskers): consider parallelizing this
     let mut tags = tags
         .into_iter()
         .map(|tag| {
@@ -105,37 +106,14 @@ pub async fn generate_feed(
         })
         .collect::<Result<Vec<(String, model::Score)>, _>>()?;
 
-    //TODO(superwhiskers): something something use scaledratingdata
-    let mut tag_rating_sum = 0;
-    let mut tag_deviation_sum = 0;
-    let mut tag_volatility_sum = 0;
+    let mut tag_sum = ScaledRatingData {
+        rating: 0.0,
+        deviation: 0.0,
+        volatility: 0.0,
+    };
 
     for (ref tag, ref mut score) in &mut tags {
-        let months =
-            (SystemTime::UNIX_EPOCH + Duration::from_secs(score.last_period))
-                .elapsed()
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "unable to calculate the amount of time that has passed since the previous rating interval for a tag",
-                    )
-                })?
-                .as_secs()
-                    / (60 * 60 * 24 * 30);
-
-        if months != 0 {
-            for _ in 0..months {
-                glicko_2::close_player_rating_period_scaled(
-                    &mut score.score,
-                    &[],
-                    Parameters::new(
-                        glicko_2_constants::DEFAULT_START_RATING,
-                        0.6,
-                        glicko_2_constants::DEFAULT_CONVERGENCE_TOLERANCE,
-                    ),
-                )
-            }
-
+        if util::decay_score(score, 1)? {
             let score = rmp_serde::to_vec(&*score).map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -159,22 +137,106 @@ pub async fn generate_feed(
             })?;
         }
 
-        tag_score_sum += score.score.
+        tag_sum += ScaledRatingWrapper(score.score);
     }
 
-    //TODO(superwhiskers): iterate over the candidate links and perform the operations as laid out in the notes document
-    ,
+    let mut tag_importance = HashMap::with_capacity(tags.len());
+    for (tag, score) in tags {
+        tag_importance.insert(tag, ScaledRatingWrapper(score.score) / &tag_sum);
+    }
 
-    Ok([
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-    ])
+    let mut candidate_scores = Vec::new();
+    for candidate in candidates {
+        //TODO(superwhiskers): perhaps we should factor this out into a function, given that
+        //                     we do this twice (and will probably do it more times)
+        let candidate_tags = sqlx::query!(
+            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            candidate,
+        )
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query a candidate link's tags from the db",
+            )
+        })?
+        .into_iter()
+        .map(|tag| {
+            rmp_serde::from_slice(&tag.score)
+                .map(|score| (tag.tag, score))
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to deserialize the score data for a tag",
+                    )
+                })
+        })
+        .collect::<Result<Vec<(String, model::Score)>, _>>()?;
+
+        let mut scaled_avg = ScaledRatingData {
+            rating: 0.0,
+            deviation: 0.0,
+            volatility: 0.0,
+        };
+        let mut overlap = 0.0; // there will always be overlap.
+        for (tag, mut score) in candidate_tags {
+            if let Some(percentage) = tag_importance.get(&tag) {
+                if util::decay_score(&mut score, 12)? {
+                    let score = rmp_serde::to_vec(&score).map_err(|_| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "unable to convert data to messagepack",
+                        )
+                    })?;
+
+                    sqlx::query!(
+                        r"UPDATE scores SET score = ? WHERE id = ? AND tag = ?",
+                        score,
+                        candidate,
+                        tag
+                    )
+                    .execute(&mut connection)
+                    .await
+                    .map_err(|_| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "unable to update a score",
+                        )
+                    })?;
+                }
+
+                scaled_avg += percentage.clone() * ScaledRatingWrapper(score.score);
+                overlap += 1.0;
+            }
+        }
+
+        scaled_avg /= overlap;
+        if scaled_avg.rating.is_nan()
+            || scaled_avg.deviation.is_nan()
+            || scaled_avg.volatility.is_nan()
+        {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "a nan was encountered"));
+        }
+        candidate_scores.push((candidate, scaled_avg));
+    }
+
+    candidate_scores.sort_unstable_by(|(_, ref left), (_, ref right)| {
+        left.partial_cmp(&right).expect("invariant violation lmao")
+    });
+
+    let mut feed = Vec::with_capacity(10);
+    let mut rng = Pcg64::from_entropy();
+    let segment_length = candidate_scores.len().div_ceil(4);
+    for (i, segment) in candidate_scores.rchunks_mut(segment_length).enumerate() {
+        feed.extend(
+            segment
+                .choose_multiple(&mut rng, 4 - i)
+                .map(|(id, _)| id.to_string()),
+        );
+    }
+
+    feed.shuffle(&mut rng);
+
+    Ok(feed)
 }

@@ -36,7 +36,7 @@ use std::{
 use tracing::debug;
 use ulid::Ulid;
 
-use crate::{model, templates};
+use crate::{feed, model, templates};
 
 static TAG_DELIMITER_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\s*,\s*").expect("unable to compile a regex"));
@@ -68,7 +68,7 @@ pub async fn index(
         })?;
 
         if let Some(feed) = sqlx::query_scalar!(
-            r"SELECT feed FROM accounts WHERE account_id = ?",
+            r#"SELECT feed as "feed!" FROM accounts WHERE account_id = ?"#,
             account_id
         )
         .fetch_optional(&mut connection)
@@ -76,6 +76,34 @@ pub async fn index(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
         {
             //TODO(superwhiskers): check for the feed age & update the feed using the algorithm you've described prior if it is too old (>a day)
+            let mut feed = rmp_serde::from_slice::<model::Feed>(&feed).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to deserialize the feed"))?;
+
+            if (SystemTime::UNIX_EPOCH + Duration::from_secs(feed.refreshed))
+                .elapsed()
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
+                .as_secs()
+                    > (60 * 60 * 24) {
+                    feed = model::Feed {
+                        links: feed::generate_feed(sqlite.acquire().await.map_err(|_| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "unable to acquire a db connection",
+                            )
+                        })?, account_id).await?,
+                        refreshed: SystemTime::UNIX_EPOCH
+                            .elapsed()
+                            .map_err(|_| {
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "unable to calculate the amount of time that has passed since the unix epoch",
+                                )
+                            })?
+                            .as_secs(),
+                    };
+
+                    sqlx::query!(r"UPDATE ")
+                        //TODO(superwhiskers): finish
+                }
 
             Ok((
                 [("Content-Type", "application/xhtml+xml")],

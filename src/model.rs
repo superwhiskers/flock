@@ -16,15 +16,14 @@
 //  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
+use instant_glicko_2::{algorithm::ScaledPlayerResult, ScaledRating};
 use serde::{Deserialize, Serialize};
-use instant_glicko_2::{ScaledRating, algorithm::ScaledPlayerResult};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PostLogin {
     pub account_id: String,
 }
-
 
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -37,8 +36,8 @@ pub struct Feed {
     /// The duration since the feed was last refreshed expressed in seconds since unix epoch
     pub refreshed: u64,
 
-    // An array of link ids selected to be in the feed
-    pub links: [String; 10],
+    // A vector of link ids selected to be in the feed
+    pub links: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -17,10 +17,12 @@ futures = "0.3"
 config = "0.13"
 serde = "1"
 httpdate = "1"
-ulid = "0.6"
+ulid = "1"
 regex = "1"
 rmp-serde = "1"
 http-body = "0.4"
+pcg_rand = "0.13"
+rand = "0.8"
 
 [dependencies.axum]
 version = "0.5"
