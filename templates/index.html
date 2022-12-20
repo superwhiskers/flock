@@ -14,20 +14,26 @@
       <h2>your feed</h2>
 
       {% for link in account.links %}
+        <a href="/links/{{ link.id }}">{{ link.description }}</a>
+
         {% if !link.rated %}
           {% if link.visited %}
-            <a href="/links/{{ link.id }}/like">like</a>
-            <a href="/links/{{ link.id }}/dislike">dislike</a>
-            <a href="/links/{{ link.id }}/edit">edit</a>
+            | <a href="/links/{{ link.id }}/promote">promote</a>
+            <a href="/links/{{ link.id }}/neutral">neutral</a>
+            <a href="/links/{{ link.id }}/demote">demote</a>
+            {# <a href="/links/{{ link.id }}/edit">edit</a> #}
           {% endif %}
 
-          <a href="/links/{{ link.id }}">{{ link.description }}</a><br/>
         {% endif %}
+
+        <br/>
       {% endfor %}
     {% when None %}
       <a href="/login">log in</a><br/>
       <a href="/signup">sign up</a><br/>
   {% endmatch %}
+
+  <h2>miscellaneous</h2>
 
   <a href="/tags">current tags</a><br/>
   <a href="/post">post a link</a>

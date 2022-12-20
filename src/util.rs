@@ -24,7 +24,8 @@ use sqlx::SqlitePool;
 use std::{
     borrow::Borrow,
     cmp::{self, Ordering},
-    ops,
+    fmt::Debug,
+    ops::{self, RangeInclusive},
     time::{Duration, SystemTime},
 };
 use tokio::signal;
@@ -32,11 +33,63 @@ use tracing::info;
 
 use crate::model;
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScaledRatingData {
     pub rating: f64,
     pub deviation: f64,
     pub volatility: f64,
+}
+
+impl ScaledRatingData {
+    pub fn prune_nan(self) -> Self {
+        Self {
+            rating: self.rating.is_nan().then_some(0.0).unwrap_or(self.rating),
+            deviation: self
+                .deviation
+                .is_nan()
+                .then_some(0.0)
+                .unwrap_or(self.deviation),
+            volatility: self
+                .volatility
+                .is_nan()
+                .then_some(0.0)
+                .unwrap_or(self.volatility),
+        }
+    }
+
+    pub fn to_range(&self) -> RangeInclusive<f64> {
+        RangeInclusive::new(self.rating - self.deviation, self.rating + self.deviation)
+    }
+
+    pub fn cmp_volatility(&self, other: &Self) -> Option<cmp::Ordering> {
+        self.deviation
+            .partial_cmp(&other.deviation)
+            .and_then(|ord| {
+                if ord == Ordering::Equal {
+                    self.volatility
+                        .partial_cmp(&other.volatility)
+                        .map(|ord| match ord {
+                            Ordering::Greater => Ordering::Less,
+                            Ordering::Less => Ordering::Greater,
+                            Ordering::Equal => Ordering::Equal,
+                        })
+                } else if ord == Ordering::Less {
+                    Some(Ordering::Greater)
+                } else {
+                    Some(Ordering::Less)
+                }
+            })
+    }
+}
+
+impl From<ScaledRatingWrapper> for ScaledRatingData {
+    fn from(value: ScaledRatingWrapper) -> Self {
+        ScaledRatingData {
+            rating: value.0.rating(),
+            deviation: value.0.deviation(),
+            volatility: value.0.volatility(),
+        }
+    }
 }
 
 impl cmp::PartialOrd for ScaledRatingData {
@@ -86,20 +139,18 @@ impl ops::AddAssign for ScaledRatingData {
 impl ops::Add<ScaledRatingWrapper> for ScaledRatingData {
     type Output = ScaledRatingData;
 
-    fn add(self, rhs: ScaledRatingWrapper) -> Self::Output {
-        let mut out = self.clone();
-        out += rhs;
-        out
+    fn add(mut self, rhs: ScaledRatingWrapper) -> Self::Output {
+        self += rhs;
+        self
     }
 }
 
 impl ops::Add for ScaledRatingData {
     type Output = ScaledRatingData;
 
-    fn add(self, rhs: ScaledRatingData) -> Self::Output {
-        let mut out = self.clone();
-        out += rhs;
-        out
+    fn add(mut self, rhs: ScaledRatingData) -> Self::Output {
+        self += rhs;
+        self
     }
 }
 
@@ -121,10 +172,9 @@ where
 {
     type Output = ScaledRatingData;
 
-    fn mul(self, rhs: RW) -> Self::Output {
-        let mut out = self.clone();
-        out *= rhs.borrow();
-        out
+    fn mul(mut self, rhs: RW) -> Self::Output {
+        self *= rhs.borrow();
+        self
     }
 }
 
@@ -139,14 +189,40 @@ impl ops::DivAssign<f64> for ScaledRatingData {
 impl ops::Div<f64> for ScaledRatingData {
     type Output = ScaledRatingData;
 
-    fn div(self, rhs: f64) -> Self::Output {
-        let mut out = self.clone();
-        out /= rhs;
-        out
+    fn div(mut self, rhs: f64) -> Self::Output {
+        self /= rhs;
+        self
     }
 }
 
+impl<RD> ops::Div<RD> for ScaledRatingData
+where
+    RD: Borrow<ScaledRatingData>,
+{
+    type Output = ScaledRatingData;
+
+    fn div(self, rhs: RD) -> Self::Output {
+        let rhs = rhs.borrow();
+        ScaledRatingData {
+            rating: self.rating / rhs.rating,
+            deviation: self.deviation / rhs.deviation,
+            volatility: self.volatility / rhs.volatility,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct ScaledRatingWrapper(pub ScaledRating);
+
+impl ScaledRatingWrapper {
+    pub fn abs(self) -> ScaledRatingData {
+        ScaledRatingData {
+            rating: self.0.rating().abs(),
+            deviation: self.0.deviation().abs(),
+            volatility: self.0.volatility().abs(),
+        }
+    }
+}
 
 impl<RD> ops::Div<RD> for ScaledRatingWrapper
 where
@@ -162,6 +238,13 @@ where
             volatility: self.0.volatility() / rhs.volatility,
         }
     }
+}
+
+pub fn rating_overlap(a: ScaledRatingData, b: ScaledRatingData) -> f64 {
+    let (s1, e1) = (a.rating - a.deviation, a.rating + a.deviation);
+    let (s2, e2) = (b.rating - b.deviation, b.rating + b.deviation);
+
+    f64::min(e1, e2) - f64::max(s1, s2)
 }
 
 pub fn decay_score(
@@ -203,6 +286,19 @@ pub fn decay_score(
         score.result_queue.clear();
 
         score.last_period += period_as_seconds * periods;
+
+        true
+    } else if score.result_queue.len() >= 10 {
+        //TODO(superwhiskers): ditto
+        glicko_2::close_player_rating_period_scaled(
+            &mut score.score,
+            score.result_queue.as_slice(),
+            Parameters::new(
+                glicko_2_constants::DEFAULT_START_RATING,
+                0.6,
+                glicko_2_constants::DEFAULT_CONVERGENCE_TOLERANCE,
+            ),
+        );
 
         true
     } else {

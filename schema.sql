@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 CREATE TABLE IF NOT EXISTS links (
+    --TODO: allow for links to be purely textual
     link_id TEXT PRIMARY KEY,
     link TEXT,
     description TEXT

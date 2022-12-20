@@ -21,6 +21,7 @@ use pcg_rand::Pcg64;
 use rand::{seq::SliceRandom, SeedableRng};
 use sqlx::{pool::PoolConnection, Sqlite};
 use std::collections::{HashMap, HashSet};
+use tracing::{debug, trace};
 
 use crate::{
     model,
@@ -77,8 +78,14 @@ pub async fn generate_feed(
         );
     }
 
-    //TODO(superwhiskers): finish your implementation
-    let tags = sqlx::query!(
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    //TODO(superwhiskers): it would likely be more beneficial memory-wise to not use
+    //                     fetch_all and instead use fetch, if possible
+    //TODO(superwhiskers): consider parallelizing this
+    let mut tags = sqlx::query!(
         r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
         account_id
     )
@@ -89,22 +96,19 @@ pub async fn generate_feed(
             StatusCode::INTERNAL_SERVER_ERROR,
             "unable to query the account's tags from the db",
         )
-    })?;
-
-    //TODO(superwhiskers): consider parallelizing this
-    let mut tags = tags
-        .into_iter()
-        .map(|tag| {
-            rmp_serde::from_slice(&tag.score)
-                .map(|score| (tag.tag, score))
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "unable to deserialize the score data for a tag",
-                    )
-                })
-        })
-        .collect::<Result<Vec<(String, model::Score)>, _>>()?;
+    })?
+    .into_iter()
+    .map(|tag| {
+        rmp_serde::from_slice(&tag.score)
+            .map(|score| (tag.tag, score))
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to deserialize the score data for a tag",
+                )
+            })
+    })
+    .collect::<Result<Vec<(String, model::Score)>, _>>()?;
 
     let mut tag_sum = ScaledRatingData {
         rating: 0.0,
@@ -137,18 +141,25 @@ pub async fn generate_feed(
             })?;
         }
 
-        tag_sum += ScaledRatingWrapper(score.score);
+        tag_sum += ScaledRatingWrapper(score.score).abs();
     }
 
     let mut tag_importance = HashMap::with_capacity(tags.len());
     for (tag, score) in tags {
-        tag_importance.insert(tag, ScaledRatingWrapper(score.score) / &tag_sum);
+        let importance = (ScaledRatingWrapper(score.score).abs() / tag_sum).prune_nan();
+        debug!(
+            "inserting tag importance for {} with score {:?}: {:?}",
+            tag, score, importance
+        );
+        tag_importance.insert(tag, importance);
     }
 
     let mut candidate_scores = Vec::new();
     for candidate in candidates {
         //TODO(superwhiskers): perhaps we should factor this out into a function, given that
         //                     we do this twice (and will probably do it more times)
+        //TODO(superwhiskers): the same note about using fetch over fetch_all applies here
+        //                     as well
         let candidate_tags = sqlx::query!(
             r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
             candidate,
@@ -206,7 +217,7 @@ pub async fn generate_feed(
                     })?;
                 }
 
-                scaled_avg += percentage.clone() * ScaledRatingWrapper(score.score);
+                scaled_avg += *percentage * ScaledRatingWrapper(score.score);
                 overlap += 1.0;
             }
         }
@@ -216,13 +227,17 @@ pub async fn generate_feed(
             || scaled_avg.deviation.is_nan()
             || scaled_avg.volatility.is_nan()
         {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "a nan was encountered"));
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "invariant violation lmao (nan)",
+            ));
         }
         candidate_scores.push((candidate, scaled_avg));
     }
 
     candidate_scores.sort_unstable_by(|(_, ref left), (_, ref right)| {
-        left.partial_cmp(&right).expect("invariant violation lmao")
+        left.partial_cmp(right)
+            .expect("invariant violation lmao (nan)")
     });
 
     let mut feed = Vec::with_capacity(10);

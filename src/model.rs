@@ -19,19 +19,19 @@
 use instant_glicko_2::{algorithm::ScaledPlayerResult, ScaledRating};
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PostLogin {
     pub account_id: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PostSignup {
     pub tags: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Feed {
     /// The duration since the feed was last refreshed expressed in seconds since unix epoch
     pub refreshed: u64,
@@ -40,13 +40,10 @@ pub struct Feed {
     pub links: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Score {
     /// The Glicko-2 score associated with the (id, tag)
     pub score: ScaledRating,
-
-    /// The number of ratings that have been made since the last rating period closure
-    pub ratings_since_last_period: u8,
 
     /// The time of the last rating period closure expressed in seconds since unix epoch
     pub last_period: u64,
@@ -55,7 +52,7 @@ pub struct Score {
     pub result_queue: Vec<ScaledPlayerResult>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PostPost {
     pub link: String,
@@ -63,7 +60,7 @@ pub struct PostPost {
     pub tags: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PostEditLink {
     pub description: String,

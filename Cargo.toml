@@ -25,7 +25,7 @@ pcg_rand = "0.13"
 rand = "0.8"
 
 [dependencies.axum]
-version = "0.5"
+version = "0.6"
 features = ["form", "http1", "http2", "tower-log", "headers"]
 
 [dependencies.askama]

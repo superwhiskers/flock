@@ -25,18 +25,22 @@ use axum::{
     Extension, TypedHeader,
 };
 use http_body::combinators::UnsyncBoxBody;
-use instant_glicko_2::{algorithm as glicko_2, ScaledRating};
+use instant_glicko_2::{algorithm::ScaledPlayerResult, ScaledRating};
 use regex::Regex;
 use sqlx::SqlitePool;
 use std::{
-    collections::HashSet,
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
     sync::LazyLock,
     time::{Duration, SystemTime},
 };
-use tracing::debug;
 use ulid::Ulid;
 
-use crate::{feed, model, templates};
+use crate::{
+    feed, model,
+    templates::{self, Link},
+    util::{self, ScaledRatingData, ScaledRatingWrapper},
+};
 
 static TAG_DELIMITER_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\s*,\s*").expect("unable to compile a regex"));
@@ -83,34 +87,91 @@ pub async fn index(
                 .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
                 .as_secs()
                     > (60 * 60 * 24) {
-                    feed = model::Feed {
-                        links: feed::generate_feed(sqlite.acquire().await.map_err(|_| {
+                feed = model::Feed {
+                    links: feed::generate_feed(sqlite.acquire().await.map_err(|_| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "unable to acquire a db connection",
+                        )
+                    })?, account_id).await?,
+                    refreshed: SystemTime::UNIX_EPOCH
+                        .elapsed()
+                        .map_err(|_| {
                             (
                                 StatusCode::INTERNAL_SERVER_ERROR,
-                                "unable to acquire a db connection",
+                                "unable to calculate the amount of time that has passed since the unix epoch",
                             )
-                        })?, account_id).await?,
-                        refreshed: SystemTime::UNIX_EPOCH
-                            .elapsed()
-                            .map_err(|_| {
-                                (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    "unable to calculate the amount of time that has passed since the unix epoch",
-                                )
-                            })?
-                            .as_secs(),
-                    };
+                        })?
+                        .as_secs(),
+                };
 
-                    sqlx::query!(r"UPDATE ")
-                        //TODO(superwhiskers): finish
-                }
+                let serialized_feed = rmp_serde::to_vec(&feed)
+                    .map_err(|_| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "unable to serialize the new feed",
+                        )
+                    })?;
+
+                sqlx::query!(
+                    r"UPDATE accounts SET feed = ? WHERE account_id = ?",
+                    serialized_feed,
+                    account_id
+                )
+                .execute(&mut connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to update the feed",
+                    )
+                })?;
+            }
+
+            let mut links = Vec::with_capacity(feed.links.len());
+            for link_id in feed.links {
+                let description = sqlx::query!(
+                    r#"SELECT description as "description!" FROM links WHERE link_id = ?"#,
+                    link_id,
+                )
+                .fetch_one(&mut connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to query for a link's information",
+                    )
+                })?
+                .description;
+
+                let (visited, rated) = sqlx::query!(
+                    r#"SELECT rated as "rated!" FROM seen WHERE account_id = ? AND link_id = ?"#,
+                    account_id,
+                    link_id,
+                )
+                .fetch_optional(&mut connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to query the database of seen links for a link",
+                    )
+                })?.map(|result| (true, result.rated)).unwrap_or((false, false));
+
+                links.push(Link {
+                    id: link_id,
+                    description,
+                    rated,
+                    visited,
+                });
+            }
 
             Ok((
                 [("Content-Type", "application/xhtml+xml")],
                 templates::Index {
                     account: Some(templates::Account {
                         id: account_id.to_string(),
-                        links: vec![],
+                        links,
                     }),
                 },
             ))
@@ -256,7 +317,6 @@ pub async fn post_signup(
 
         let score = rmp_serde::to_vec(&model::Score {
             score,
-            ratings_since_last_period: 0,
             last_period,
             result_queue: vec![],
         })
@@ -422,7 +482,6 @@ pub async fn post_post(
 
         let score = rmp_serde::to_vec(&model::Score {
             score,
-            ratings_since_last_period: 0,
             last_period,
             result_queue: vec![],
         })
@@ -492,8 +551,8 @@ pub async fn link(
             == 1
         {
             sqlx::query!(
-                "INSERT OR IGNORE INTO seen (account_id, link_id, rated) VALUES (?, ?, ?)",
-                account_id, link_id, false
+                "INSERT OR IGNORE INTO seen (account_id, link_id, rated) VALUES (?, ?, false)",
+                account_id, link_id
             ).execute(&mut connection).await.map_err(|_| {
                 (StatusCode::INTERNAL_SERVER_ERROR, "unable to mark this link as seen")
             })?;
@@ -548,7 +607,7 @@ pub async fn get_edit_link(
 
     Ok(templates::EditLink {
         id: link_id,
-        description: description,
+        description,
         tags: tags.join(","),
     })
 }
@@ -647,7 +706,6 @@ pub async fn post_edit_link(
 
             let score = rmp_serde::to_vec(&model::Score {
                 score,
-                ratings_since_last_period: 0,
                 last_period,
                 result_queue: vec![],
             })
@@ -681,3 +739,212 @@ pub async fn post_edit_link(
 }
 
 //TODO(superwhiskers): implement link rating
+pub async fn get_promote_link(
+    Extension(sqlite): Extension<SqlitePool>,
+    cookies: Option<TypedHeader<Cookie>>,
+    Path(link_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    rate_link(sqlite, cookies, link_id, 0.75).await
+}
+
+pub async fn get_neutral_link(
+    Extension(sqlite): Extension<SqlitePool>,
+    cookies: Option<TypedHeader<Cookie>>,
+    Path(link_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    rate_link(sqlite, cookies, link_id, 0.5).await
+}
+
+pub async fn get_demote_link(
+    Extension(sqlite): Extension<SqlitePool>,
+    cookies: Option<TypedHeader<Cookie>>,
+    Path(link_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    rate_link(sqlite, cookies, link_id, 0.0).await
+}
+
+#[inline(always)]
+pub async fn rate_link(
+    sqlite: SqlitePool,
+    cookies: Option<TypedHeader<Cookie>>,
+    link_id: String,
+    base_outcome: f64,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    if let Some(cookies) = cookies
+        && let Some(account_id) = cookies.get("flock.id") {
+        let mut connection = sqlite.acquire().await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to acqire a db connection",
+            )
+        })?;
+
+        //TODO(superwhiskers): same thing mentioned in src/feed.rs, but we should
+        //                     additionally consider making this a function at this point
+        let user_scores = sqlx::query!(
+            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            account_id
+        )
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query the account's tags from the db",
+            )
+        })?
+        .into_iter()
+        .map(|tag| {
+            rmp_serde::from_slice(&tag.score)
+                .map(|score| (tag.tag, score))
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to deserialize the score data for a tag",
+                    )
+                })
+        })
+        .collect::<Result<HashMap<String, model::Score>, _>>()?;
+
+        let link_scores = sqlx::query!(
+            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            link_id
+        )
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query the link's tags from the db",
+            )
+        })?
+        .into_iter()
+        .map(|tag| {
+            rmp_serde::from_slice(&tag.score)
+                .map(|score| (tag.tag, score))
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to deserialize the score data for a tag",
+                    )
+                })
+        })
+        .collect::<Result<HashMap<String, model::Score>, _>>()?;
+
+        let user_tags = user_scores
+            .keys()
+            .collect::<HashSet<_>>();
+
+        let link_tags = link_scores
+            .keys()
+            .collect::<HashSet<_>>();
+
+        for tag in HashSet::intersection(&user_tags, &link_tags) {
+            let (mut user_score_data, mut link_score_data) = user_scores.get(*tag).cloned().zip(link_scores.get(*tag).cloned()).unwrap();
+            let (user_score, link_score) =
+                (
+                    ScaledRatingWrapper(user_score_data.score).into(),
+                    ScaledRatingWrapper(link_score_data.score).into(),
+                );
+            let comparative_volatility = ScaledRatingData::cmp_volatility(&user_score, &link_score).ok_or((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to compare the volatilities of scores",
+            ))?;
+
+            let (user_outcome, link_outcome) = if comparative_volatility == Ordering::Equal {
+                (base_outcome, base_outcome)
+            } else {
+                let overlap = util::rating_overlap(user_score, link_score);
+                if overlap.is_nan() {
+                    return Err((StatusCode::INTERNAL_SERVER_ERROR, "a nan was encountered while calculating overlap"));
+                }
+
+                let percent_overlap = overlap / if overlap.is_sign_positive() {
+                    2.0 * f64::min(user_score.deviation, link_score.deviation)
+                } else {
+                     user_score.deviation + link_score.deviation + (user_score.rating - link_score.rating).abs()
+                };
+
+                let tweaked_outcome = base_outcome + (0.25 * percent_overlap);
+                let (favorable_outcome, unfavorable_outcome) = if tweaked_outcome > base_outcome {
+                    (tweaked_outcome, base_outcome)
+                } else {
+                    (base_outcome, tweaked_outcome)
+                };
+
+                if comparative_volatility == Ordering::Less {
+                    (favorable_outcome, unfavorable_outcome)
+                } else {
+                    (unfavorable_outcome, favorable_outcome)
+                }
+            };
+
+            user_score_data.result_queue.push(ScaledPlayerResult::new(link_score_data.score, user_outcome));
+            link_score_data.result_queue.push(ScaledPlayerResult::new(user_score_data.score, link_outcome));
+
+            util::decay_score(&mut user_score_data, 1)?;
+            util::decay_score(&mut link_score_data, 12)?;
+
+            let user_score_bin = rmp_serde::to_vec(&user_score_data).map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to convert data to messagepack",
+                )
+            })?;
+
+            sqlx::query!(
+                "UPDATE scores SET score = ? WHERE id = ? AND tag = ?",
+                user_score_bin,
+                account_id,
+                tag
+            )
+            .execute(&mut connection)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to update a score",
+                )
+            })?;
+
+            let link_score_bin = rmp_serde::to_vec(&link_score_data).map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to convert data to messagepack",
+                )
+            })?;
+
+            sqlx::query!(
+                "UPDATE scores SET score = ? WHERE id = ? AND tag = ?",
+                link_score_bin,
+                link_id,
+                tag
+            )
+            .execute(&mut connection)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to update a score",
+                )
+            })?;
+
+            // someone's going to try to rate before viewing. this handles that edge case
+            sqlx::query!(
+                "INSERT INTO seen (account_id, link_id, rated) VALUES (?, ?, true) ON CONFLICT (account_id, link_id) DO UPDATE SET rated = true",
+                account_id,
+                link_id
+            )
+            .execute(&mut connection)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to update the rated value",
+                )
+            })?;
+        }
+    }
+
+    Ok(Redirect::to("/"))
+}

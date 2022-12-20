@@ -44,13 +44,17 @@
 #![deny(clippy::option_option)]
 #![deny(clippy::mut_mut)]
 #![feature(option_result_contains)]
+#![feature(impl_trait_in_fn_trait_return)]
 #![feature(once_cell)]
 #![feature(let_chains)]
 #![feature(int_roundings)]
+#![feature(async_closure)]
+#![feature(assert_matches)]
 
 mod configuration;
 mod feed;
 mod model;
+mod overlap;
 mod routes;
 mod templates;
 mod util;
@@ -110,12 +114,12 @@ async fn main() -> anyhow::Result<()> {
             "/links/:link_id",
             Router::new()
                 .route("/", get(routes::link))
-                .route("/like", get(|| async {}))
-                .route("/dislike", get(|| async {}))
-                .route(
-                    "/edit",
-                    get(routes::get_edit_link).post(routes::post_edit_link),
-                ),
+                .route("/promote", get(routes::get_promote_link))
+                .route("/neutral", get(routes::get_neutral_link))
+                .route("/demote", get(routes::get_demote_link)), /*.route(
+                                                         "/edit",
+                                                         get(routes::get_edit_link).post(routes::post_edit_link),
+                                                     )*/
         )
         .layer(Extension(sqlite.clone()));
 
