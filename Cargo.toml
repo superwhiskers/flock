@@ -11,6 +11,7 @@ edition = "2021"
 license = "AGPL-3.0"
 
 [profile.release-lto]
+inherits = "release"
 opt-level = 3
 codegen-units = 1
 debug = false
