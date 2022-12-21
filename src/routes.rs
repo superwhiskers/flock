@@ -34,10 +34,13 @@ use std::{
     sync::LazyLock,
     time::{Duration, SystemTime},
 };
+use tracing::{debug, trace};
 use ulid::Ulid;
 
 use crate::{
+    configuration::Routes as RouteConfiguration,
     feed, model,
+    rand::pcg_thread_rng,
     templates::{self, Link},
     util::{self, ScaledRatingData, ScaledRatingWrapper},
 };
@@ -46,10 +49,12 @@ static TAG_DELIMITER_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\s*,\s*").expect("unable to compile a regex"));
 
 static TAG_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[[:alnum:]_\-]+").expect("unable to compile a regex"));
+    LazyLock::new(|| Regex::new(r"\A[[:alnum:]_\-]+\z").expect("unable to compile a regex"));
 
-pub fn string_to_tags(tags: &str) -> Result<HashSet<&'_ str>, (StatusCode, &'static str)> {
-    let tags = TAG_DELIMITER_REGEX.split(tags).collect::<HashSet<_>>();
+pub fn string_to_tags(tags: &mut str) -> Result<HashSet<&'_ str>, (StatusCode, &'static str)> {
+    tags.make_ascii_lowercase();
+
+    let tags = TAG_DELIMITER_REGEX.split(tags).collect::<HashSet<&str>>();
 
     if !tags.iter().all(|tag| TAG_REGEX.is_match(tag)) {
         return Err((StatusCode::BAD_REQUEST, "the provided tags are invalid"));
@@ -62,8 +67,12 @@ pub async fn index(
     Extension(sqlite): Extension<SqlitePool>,
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("index requested, cookies: {:?}", cookies);
+
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
+        trace!("preparing index for {}", account_id);
+
         let mut connection = sqlite.acquire().await.map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -79,14 +88,17 @@ pub async fn index(
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
         {
-            //TODO(superwhiskers): check for the feed age & update the feed using the algorithm you've described prior if it is too old (>a day)
             let mut feed = rmp_serde::from_slice::<model::Feed>(&feed).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to deserialize the feed"))?;
+
+            debug!("deserialized feed for {}: {:?}", account_id, feed);
 
             if (SystemTime::UNIX_EPOCH + Duration::from_secs(feed.refreshed))
                 .elapsed()
                 .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
                 .as_secs()
                     > (60 * 60 * 24) {
+                trace!("generating new feed for {}", account_id);
+
                 feed = model::Feed {
                     links: feed::generate_feed(sqlite.acquire().await.map_err(|_| {
                         (
@@ -104,6 +116,8 @@ pub async fn index(
                         })?
                         .as_secs(),
                 };
+
+                debug!("new feed for {}: {:?}", account_id, feed);
 
                 let serialized_feed = rmp_serde::to_vec(&feed)
                     .map_err(|_| {
@@ -129,7 +143,7 @@ pub async fn index(
             }
 
             let mut links = Vec::with_capacity(feed.links.len());
-            for link_id in feed.links {
+            for (link_id, overall_score) in feed.links {
                 let description = sqlx::query!(
                     r#"SELECT description as "description!" FROM links WHERE link_id = ?"#,
                     link_id,
@@ -162,9 +176,12 @@ pub async fn index(
                     id: link_id,
                     description,
                     rated,
+                    rating: (visited && rated).then(|| overall_score.to_string()),
                     visited,
                 });
             }
+
+            trace!("sending response to {}", account_id);
 
             Ok((
                 [("Content-Type", "application/xhtml+xml")],
@@ -182,6 +199,8 @@ pub async fn index(
             ))
         }
     } else {
+        trace!("sending logged-out index");
+
         Ok((
             [("Content-Type", "application/xhtml+xml")],
             templates::Index { account: None },
@@ -198,8 +217,11 @@ pub async fn get_login() -> impl IntoResponse {
 
 pub async fn post_login(
     Extension(sqlite): Extension<SqlitePool>,
+    Extension(route_configuration): Extension<RouteConfiguration>,
     Form(model::PostLogin { account_id }): Form<model::PostLogin>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("login post-ed with account id {}", account_id);
+
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -218,19 +240,24 @@ pub async fn post_login(
         == 1
     {
         Ok((
-            AppendHeaders([
-                // we should have a toggle in the config to add `Secure;` here or something for if
-                // https is set up
-                (
-                    SET_COOKIE,
+            AppendHeaders([(
+                SET_COOKIE,
+                if route_configuration.secure_cookies {
+                    format!(
+                        "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly; Secure",
+                        account_id,
+                        // lmao old browsers but why the heck not, it's hardly any effort
+                        httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
+                    )
+                } else {
                     format!(
                         "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly",
                         account_id,
                         // lmao old browsers but why the heck not, it's hardly any effort
                         httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
-                    ),
-                ),
-            ]),
+                    )
+                },
+            )]),
             Redirect::to("/"),
         ))
     } else {
@@ -250,9 +277,14 @@ pub async fn get_signup() -> impl IntoResponse {
 
 pub async fn post_signup(
     Extension(sqlite): Extension<SqlitePool>,
-    Form(model::PostSignup { tags }): Form<model::PostSignup>,
+    Extension(route_configuration): Extension<RouteConfiguration>,
+    Form(model::PostSignup { mut tags }): Form<model::PostSignup>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
-    let tags = string_to_tags(&tags)?;
+    trace!("signup post-ed, tags: \"{}\"", tags);
+
+    let tags = string_to_tags(&mut tags)?;
+
+    debug!("tags parsed as {:?} for account", tags);
 
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
@@ -273,7 +305,10 @@ pub async fn post_signup(
             })?;
     }
 
-    let account_id = Ulid::new().to_string();
+    let account_id = Ulid::with_source(&mut pcg_thread_rng()).to_string();
+
+    debug!("account id generated: {}", account_id);
+
     let feed = rmp_serde::to_vec(&model::Feed {
         refreshed: 0,
         links: Default::default(),
@@ -344,40 +379,55 @@ pub async fn post_signup(
     }
 
     Ok((
-        AppendHeaders([
-            // we should have a toggle in the config to add `Secure;` here or something for if
-            // https is set up
-            (
-                SET_COOKIE,
+        AppendHeaders([(
+            SET_COOKIE,
+            if route_configuration.secure_cookies {
+                format!(
+                    "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly; Secure",
+                    account_id,
+                    // lmao old browsers but why the heck not, it's hardly any effort
+                    httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
+                )
+            } else {
                 format!(
                     "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly",
                     account_id,
                     // lmao old browsers but why the heck not, it's hardly any effort
                     httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
-                ),
-            ),
-        ]),
+                )
+            },
+        )]),
         Redirect::to("/"),
     ))
 }
 
 pub async fn logout(
     cookies: Option<TypedHeader<Cookie>>,
+    Extension(route_configuration): Extension<RouteConfiguration>,
 ) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
+    trace!("logout requested, cookies: {:?}", cookies);
+
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
         (
             AppendHeaders([
-                // we should have a toggle in the config to add `Secure;` here or something for if
-                // https is set up
                 (
                     SET_COOKIE,
-                    format!(
-                        "flock.id={}; SameSite=Lax; Expires={}; Max-Age=0; HttpOnly",
-                        account_id,
-                        // lmao old browsers but why the heck not, it's hardly any effort
-                        httpdate::fmt_http_date(SystemTime::UNIX_EPOCH)
-                    ),
+                    if route_configuration.secure_cookies {
+                        format!(
+                            "flock.id={}; SameSite=Lax; Expires={}; Max-Age=0; HttpOnly; Secure",
+                            account_id,
+                            // lmao old browsers but why the heck not, it's hardly any effort
+                            httpdate::fmt_http_date(SystemTime::UNIX_EPOCH)
+                        )
+                    } else {
+                        format!(
+                            "flock.id={}; SameSite=Lax; Expires={}; Max-Age=0; HttpOnly",
+                            account_id,
+                            // lmao old browsers but why the heck not, it's hardly any effort
+                            httpdate::fmt_http_date(SystemTime::UNIX_EPOCH)
+                        )
+                    },
                 ),
             ]),
             Redirect::to("/"),
@@ -423,10 +473,14 @@ pub async fn post_post(
     Form(model::PostPost {
         link,
         description,
-        tags,
+        mut tags,
     }): Form<model::PostPost>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
-    let tags = string_to_tags(&tags)?;
+    trace!("post post-ed, tags: \"{}\"", tags);
+
+    let tags = string_to_tags(&mut tags)?;
+
+    debug!("tags parsed as {:?} for post", tags);
 
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
@@ -447,7 +501,9 @@ pub async fn post_post(
             })?;
     }
 
-    let link_id = Ulid::new().to_string();
+    let link_id = Ulid::with_source(&mut pcg_thread_rng()).to_string();
+
+    debug!("link id generated: {}", link_id);
 
     sqlx::query!(
         "INSERT INTO LINKS (link_id, link, description) VALUES (?, ?, ?)",
@@ -464,6 +520,8 @@ pub async fn post_post(
         )
     })?;
 
+    //TODO(superwhiskers): this and the similar loop used in account creation (and likely
+    //                     account tag modification) could be factored out
     for tag in tags {
         let score = ScaledRating::new(
             0.0,
@@ -516,6 +574,12 @@ pub async fn link(
     cookies: Option<TypedHeader<Cookie>>,
     Path(link_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!(
+        "link requested, cookies: {:?}, link id: {}",
+        cookies,
+        link_id
+    );
+
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -539,6 +603,7 @@ pub async fn link(
 
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
+        debug!("account {} requested link {}", account_id, link_id);
 
         if sqlx::query!(
             r"SELECT COUNT(1) as count FROM accounts WHERE account_id = ?",
@@ -615,7 +680,10 @@ pub async fn get_edit_link(
 pub async fn post_edit_link(
     Extension(sqlite): Extension<SqlitePool>,
     Path(link_id): Path<String>,
-    Form(model::PostEditLink { description, tags }): Form<model::PostEditLink>,
+    Form(model::PostEditLink {
+        description,
+        mut tags,
+    }): Form<model::PostEditLink>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
@@ -634,7 +702,7 @@ pub async fn post_edit_link(
     .count
         == 1
     {
-        let tags = string_to_tags(&tags)?;
+        let tags = string_to_tags(&mut tags)?;
         let old_tags_owned =
             sqlx::query_scalar!(r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#, link_id)
                 .fetch_all(&mut connection)
@@ -770,8 +838,12 @@ pub async fn rate_link(
     link_id: String,
     base_outcome: f64,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("link rated: {}, cookies: {:?}", link_id, cookies);
+
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
+        debug!("account {} rating link {} with base outcome {}", account_id, link_id, base_outcome);
+
         let mut connection = sqlite.acquire().await.map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

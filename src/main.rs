@@ -55,14 +55,18 @@ mod configuration;
 mod feed;
 mod model;
 mod overlap;
+mod rand;
 mod routes;
 mod templates;
 mod util;
 
 use anyhow::Context;
 use axum::{extract::Extension, routing::get, Router};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use tracing::{debug, error, info, trace, warn};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    ConnectOptions,
+};
+use tracing::{info, log::LevelFilter, trace, warn};
 use tracing_log::LogTracer;
 use tracing_subscriber::FmtSubscriber;
 
@@ -74,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::subscriber::set_global_default(
         FmtSubscriber::builder()
-            .with_env_filter(&config.general.logger)
+            .with_env_filter(&config.general.log_filter)
             .finish(),
     )?;
 
@@ -93,11 +97,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let sqlite = sqlite_pool_options
-        .connect_with(
-            SqliteConnectOptions::new()
+        .connect_with({
+            let mut options = SqliteConnectOptions::new()
                 .filename(&config.sqlite.path)
-                .create_if_missing(config.sqlite.create_if_missing),
-        )
+                .create_if_missing(config.sqlite.create_if_missing);
+            options.log_statements(LevelFilter::Debug);
+
+            options
+        })
         .await
         .context("unable to open a db connection pool")?;
 
@@ -117,13 +124,15 @@ async fn main() -> anyhow::Result<()> {
                 .route("/promote", get(routes::get_promote_link))
                 .route("/neutral", get(routes::get_neutral_link))
                 .route("/demote", get(routes::get_demote_link)), /*.route(
-                                                         "/edit",
-                                                         get(routes::get_edit_link).post(routes::post_edit_link),
-                                                     )*/
+                                                                     "/edit",
+                                                                     get(routes::get_edit_link).post(routes::post_edit_link),
+                                                                 )*/
         )
-        .layer(Extension(sqlite.clone()));
+        .layer(Extension(sqlite.clone()))
+        .layer(Extension(config.routes));
 
-    //TODO(superwhiskers): add https support
+    //TODO(superwhiskers): add https support (this isn't necessary in production, though, as
+    //                     we use nginx)
     info!("listening at http://{}", &config.http.address);
 
     axum::Server::bind(&config.http.address)

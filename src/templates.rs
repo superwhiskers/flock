@@ -33,6 +33,7 @@ pub struct Link {
     pub id: String,
     pub description: String,
     pub rated: bool,
+    pub rating: Option<String>,
     pub visited: bool,
 }
 

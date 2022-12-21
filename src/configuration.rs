@@ -37,6 +37,10 @@ pub struct Configuration {
     /// The `sqlite` section of the configuration
     #[serde(default)]
     pub sqlite: Sqlite,
+
+    /// The `route` section of the configuration
+    #[serde(default)]
+    pub routes: Routes,
 }
 
 impl Configuration {
@@ -45,7 +49,7 @@ impl Configuration {
             .add_source(File::with_name("config.toml").required(false))
             .add_source(
                 Environment::with_prefix("flock")
-                    .separator("_")
+                    .separator("__")
                     .list_separator(","),
             )
             .build()?
@@ -57,21 +61,21 @@ impl Configuration {
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct General {
     /// The logger's filter configuration
-    #[serde(default = "default_logger")]
-    pub logger: String,
+    #[serde(default = "default_log_filter")]
+    pub log_filter: String,
 }
 
 impl Default for General {
     fn default() -> Self {
         Self {
-            logger: default_logger(),
+            log_filter: default_log_filter(),
         }
     }
 }
 
-/// The default value for the `logger` field in the [`General`] configuration section
+/// The default value for the `log_filter` field in the [`General`] configuration section
 #[inline(always)]
-fn default_logger() -> String {
+fn default_log_filter() -> String {
     "info".to_string()
 }
 
@@ -153,4 +157,26 @@ fn default_path() -> PathBuf {
 #[inline(always)]
 fn default_create_if_missing() -> bool {
     true
+}
+
+/// Configuration pertaining specifically to how routes are responded to
+#[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct Routes {
+    /// Whether or not to enforce that cookies be set only to secure origins
+    #[serde(default = "default_secure_cookies")]
+    pub secure_cookies: bool,
+}
+
+impl Default for Routes {
+    fn default() -> Self {
+        Self {
+            secure_cookies: default_secure_cookies(),
+        }
+    }
+}
+
+/// The default value for the `secure_cookies` field in the [`Routes`] configuration section
+#[inline(always)]
+fn default_secure_cookies() -> bool {
+    false
 }

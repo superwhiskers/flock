@@ -18,14 +18,17 @@
 
 use axum::http::StatusCode;
 use instant_glicko_2::{
-    algorithm as glicko_2, constants as glicko_2_constants, Parameters, ScaledRating,
+    algorithm as glicko_2, constants as glicko_2_constants, FromWithParameters, Parameters, Rating,
+    ScaledRating,
 };
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::{
     borrow::Borrow,
     cmp::{self, Ordering},
     fmt::Debug,
     ops::{self, RangeInclusive},
+    sync::LazyLock,
     time::{Duration, SystemTime},
 };
 use tokio::signal;
@@ -33,7 +36,16 @@ use tracing::info;
 
 use crate::model;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+//TODO(superwhiskers): should we make these configurable?
+pub static GLICKO_2_PARAMETERS: LazyLock<Parameters> = LazyLock::new(|| {
+    Parameters::new(
+        glicko_2_constants::DEFAULT_START_RATING,
+        0.6,
+        glicko_2_constants::DEFAULT_CONVERGENCE_TOLERANCE,
+    )
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ScaledRatingData {
     pub rating: f64,
     pub deviation: f64,
@@ -57,7 +69,7 @@ impl ScaledRatingData {
         }
     }
 
-    pub fn to_range(&self) -> RangeInclusive<f64> {
+    pub fn to_range(self) -> RangeInclusive<f64> {
         RangeInclusive::new(self.rating - self.deviation, self.rating + self.deviation)
     }
 
@@ -79,6 +91,23 @@ impl ScaledRatingData {
                     Some(Ordering::Less)
                 }
             })
+    }
+}
+
+impl ToString for ScaledRatingData {
+    fn to_string(&self) -> String {
+        let unscaled = Rating::from_with_parameters(
+            ScaledRating::new(self.rating, self.deviation, self.volatility),
+            *GLICKO_2_PARAMETERS,
+        );
+
+        //TODO(superwhiskers): is this the best display for it?
+        format!(
+            "{} ± {} σ {}",
+            unscaled.rating(),
+            unscaled.deviation(),
+            unscaled.volatility()
+        )
     }
 }
 
@@ -274,12 +303,7 @@ pub fn decay_score(
                 } else {
                     &[]
                 },
-                //TODO(superwhiskers): should we make these configurable?
-                Parameters::new(
-                    glicko_2_constants::DEFAULT_START_RATING,
-                    0.6,
-                    glicko_2_constants::DEFAULT_CONVERGENCE_TOLERANCE,
-                ),
+                *GLICKO_2_PARAMETERS,
             )
         }
 
@@ -293,11 +317,7 @@ pub fn decay_score(
         glicko_2::close_player_rating_period_scaled(
             &mut score.score,
             score.result_queue.as_slice(),
-            Parameters::new(
-                glicko_2_constants::DEFAULT_START_RATING,
-                0.6,
-                glicko_2_constants::DEFAULT_CONVERGENCE_TOLERANCE,
-            ),
+            *GLICKO_2_PARAMETERS,
         );
 
         true

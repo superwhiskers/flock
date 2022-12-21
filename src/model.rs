@@ -19,6 +19,8 @@
 use instant_glicko_2::{algorithm::ScaledPlayerResult, ScaledRating};
 use serde::{Deserialize, Serialize};
 
+use crate::util::ScaledRatingData;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PostLogin {
@@ -36,8 +38,8 @@ pub struct Feed {
     /// The duration since the feed was last refreshed expressed in seconds since unix epoch
     pub refreshed: u64,
 
-    // A vector of link ids selected to be in the feed
-    pub links: Vec<String>,
+    // A vector of link ids and their overall scores selected to be in the feed
+    pub links: Vec<(String, ScaledRatingData)>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

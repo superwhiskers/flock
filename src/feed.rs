@@ -17,14 +17,14 @@
 //
 
 use axum::http::StatusCode;
-use pcg_rand::Pcg64;
-use rand::{seq::SliceRandom, SeedableRng};
+use rand::seq::SliceRandom;
 use sqlx::{pool::PoolConnection, Sqlite};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, trace};
 
 use crate::{
     model,
+    rand::pcg_thread_rng,
     util::{self, ScaledRatingData, ScaledRatingWrapper},
 };
 
@@ -32,7 +32,9 @@ use crate::{
 pub async fn generate_feed(
     mut connection: PoolConnection<Sqlite>,
     account_id: &str,
-) -> Result<Vec<String>, (StatusCode, &'static str)> {
+) -> Result<Vec<(String, ScaledRatingData)>, (StatusCode, &'static str)> {
+    trace!("generating feed for account {}", account_id);
+
     let mut candidates: HashSet<String> = HashSet::new();
 
     for tag in sqlx::query_scalar!(
@@ -240,14 +242,14 @@ pub async fn generate_feed(
             .expect("invariant violation lmao (nan)")
     });
 
+    let mut rng = pcg_thread_rng();
     let mut feed = Vec::with_capacity(10);
-    let mut rng = Pcg64::from_entropy();
     let segment_length = candidate_scores.len().div_ceil(4);
     for (i, segment) in candidate_scores.rchunks_mut(segment_length).enumerate() {
         feed.extend(
             segment
                 .choose_multiple(&mut rng, 4 - i)
-                .map(|(id, _)| id.to_string()),
+                .map(|(id, overall_score)| (id.to_string(), *overall_score)),
         );
     }
 

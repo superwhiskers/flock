@@ -26,6 +26,12 @@
 
         {% endif %}
 
+        {% match link.rating %}
+          {% when Some with (rating) %}
+            <span>| {{ rating }}</span>
+          {% when None %}
+        {% endmatch %}
+
         <br/>
       {% endfor %}
     {% when None %}
