@@ -10,6 +10,14 @@ categories = ["Web programming"]
 edition = "2021"
 license = "AGPL-3.0"
 
+[profile.release]
+opt-level = 3
+codegen-units = 1
+debug = false
+strip = "symbols"
+panic = "abort"
+lto = "fat"
+
 [dependencies]
 tracing-log = "0.1"
 anyhow = "1"
