@@ -6,9 +6,9 @@
   <h1>edit a link on flock</h1>
 
   <form method="post" action="/links/{{ id }}/edit">
-    <label>description: <input type="text" name="description" value="{{ description }}"/></label><br/>
-    <label>tags (comma-delimited): <input type="text" name="tags" value="{{ tags }}"/></label><br/>
-    <button>submit</button><br/>
+    <label class="br">description: <input type="text" name="description" value="{{ description }}"/></label>
+    <label class="br">tags (comma-delimited): <input type="text" name="tags" value="{{ tags }}"/></label>
+    <button>submit</button>
   </form>
 
   a list of tags is available <a href="/tags">here</a>
