@@ -346,8 +346,12 @@ pub async fn signal_handler(sqlite: SqlitePool) {
 }
 
 #[cfg(windows)]
-pub async fn signal_handler() {
-    signal::ctrl_c().await;
+pub async fn signal_handler(sqlite: SqlitePool) {
+    signal::ctrl_c()
+        .await
+        .expect("failed to handle ctrl+c handler");
 
     info!("stopping the server");
+
+    sqlite.close().await
 }

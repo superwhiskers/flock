@@ -5,7 +5,9 @@
 {% block body %}
   <h1>tags</h1>
 
-  {% for tag in tags %}
-    {{ tag }}<br/>
-  {% endfor %}
+  <ul class="list">
+    {% for tag in tags %}
+      <li>{{ tag }}</li>
+    {% endfor %}
+  </ul>
 {% endblock %}

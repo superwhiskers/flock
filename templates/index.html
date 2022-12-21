@@ -13,34 +13,35 @@
 
       <h2>your feed</h2>
 
-      {% for link in account.links %}
-        <a href="/links/{{ link.id }}">{{ link.description }}</a>
+      <ul>
+        {% for link in account.links %}
+          <li>
+            <a href="/links/{{ link.id }}">{{ link.description }}</a>
 
-        {% if !link.rated %}
-          {% if link.visited %}
-            | <a href="/links/{{ link.id }}/promote">promote</a>
-            <a href="/links/{{ link.id }}/neutral">neutral</a>
-            <a href="/links/{{ link.id }}/demote">demote</a>
-            {# <a href="/links/{{ link.id }}/edit">edit</a> #}
-          {% endif %}
+            {% if !link.rated %}
+              {% if link.visited %}
+                | <a href="/links/{{ link.id }}/promote">promote</a>
+                <a href="/links/{{ link.id }}/neutral">neutral</a>
+                <a href="/links/{{ link.id }}/demote">demote</a>
+                {# <a href="/links/{{ link.id }}/edit">edit</a> #}
+              {% endif %}
+            {% endif %}
 
-        {% endif %}
-
-        {% match link.rating %}
-          {% when Some with (rating) %}
-            <span>| {{ rating }}</span>
-          {% when None %}
-        {% endmatch %}
-
-        <br/>
-      {% endfor %}
+            {% match link.rating %}
+              {% when Some with (rating) %}
+                <span>| {{ rating }}</span>
+              {% when None %}
+            {% endmatch %}
+          </li>
+        {% endfor %}
+      </ul>
     {% when None %}
-      <a href="/login">log in</a><br/>
-      <a href="/signup">sign up</a><br/>
+      <a href="/login" class="br">log in</a>
+      <a href="/signup">sign up</a>
   {% endmatch %}
 
   <h2>miscellaneous</h2>
 
-  <a href="/tags">current tags</a><br/>
+  <a href="/tags" class="br">current tags</a>
   <a href="/post">post a link</a>
 {% endblock %}
