@@ -22,7 +22,6 @@ use instant_glicko_2::{
     ScaledRating,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use std::{
     borrow::Borrow,
     cmp::{self, Ordering},
@@ -32,7 +31,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::signal;
-use tracing::info;
 
 use crate::model;
 
@@ -327,7 +325,7 @@ pub fn decay_score(
 }
 
 #[cfg(unix)]
-pub async fn signal_handler(sqlite: SqlitePool) {
+pub async fn signal_handler() {
     let sigterm = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
             .expect("failed to install a sigterm handler")
@@ -339,19 +337,9 @@ pub async fn signal_handler(sqlite: SqlitePool) {
         _ = signal::ctrl_c() => {},
         _ = sigterm => {},
     }
-
-    info!("stopping the server");
-
-    sqlite.close().await
 }
 
 #[cfg(windows)]
-pub async fn signal_handler(sqlite: SqlitePool) {
-    signal::ctrl_c()
-        .await
-        .expect("failed to handle ctrl+c handler");
-
-    info!("stopping the server");
-
-    sqlite.close().await
+pub async fn signal_handler() {
+    signal::ctrl_c().await;
 }

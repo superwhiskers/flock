@@ -43,18 +43,13 @@
 #![deny(clippy::single_match_else)]
 #![deny(clippy::option_option)]
 #![deny(clippy::mut_mut)]
-#![feature(option_result_contains)]
-#![feature(impl_trait_in_fn_trait_return)]
 #![feature(once_cell)]
 #![feature(let_chains)]
 #![feature(int_roundings)]
-#![feature(async_closure)]
-#![feature(assert_matches)]
 
 mod configuration;
 mod feed;
 mod model;
-mod overlap;
 mod rand;
 mod routes;
 mod templates;
@@ -137,8 +132,12 @@ async fn main() -> anyhow::Result<()> {
 
     axum::Server::bind(&config.http.address)
         .serve(app.into_make_service())
-        .with_graceful_shutdown(util::signal_handler(sqlite))
+        .with_graceful_shutdown(util::signal_handler())
         .await?;
+
+    info!("stopping the server");
+
+    sqlite.close().await;
 
     Ok(())
 }

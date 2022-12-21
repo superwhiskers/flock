@@ -14,7 +14,8 @@
 //
 //  You should have received a copy of the GNU Affero General Public License
 //  along with this program.  If not, see <https://www.gnu.org/licenses/>.
-//
+
+//TODO(superwhiskers): find a place to put this
 
 use std::{
     assert_matches::debug_assert_matches,
