@@ -10,7 +10,7 @@ categories = ["Web programming"]
 edition = "2021"
 license = "AGPL-3.0"
 
-[profile.release]
+[profile.release-lto]
 opt-level = 3
 codegen-units = 1
 debug = false
