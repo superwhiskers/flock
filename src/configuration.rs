@@ -165,12 +165,17 @@ pub struct Routes {
     /// Whether or not to enforce that cookies be set only to secure origins
     #[serde(default = "default_secure_cookies")]
     pub secure_cookies: bool,
+
+    /// The refresh period for the feed, in seconds
+    #[serde(default = "default_feed_refresh_period")]
+    pub feed_refresh_period: u64,
 }
 
 impl Default for Routes {
     fn default() -> Self {
         Self {
             secure_cookies: default_secure_cookies(),
+            feed_refresh_period: default_feed_refresh_period(),
         }
     }
 }
@@ -179,4 +184,11 @@ impl Default for Routes {
 #[inline(always)]
 fn default_secure_cookies() -> bool {
     false
+}
+
+/// The default value for the `feed_refresh_period` field in the [`Routes`] configuration section
+#[inline(always)]
+fn default_feed_refresh_period() -> u64 {
+    // 24 hours
+    60 * 60 * 24
 }

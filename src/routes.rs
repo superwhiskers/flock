@@ -65,6 +65,7 @@ pub fn string_to_tags(tags: &mut str) -> Result<HashSet<&'_ str>, (StatusCode, &
 
 pub async fn index(
     Extension(sqlite): Extension<SqlitePool>,
+    Extension(route_configuration): Extension<RouteConfiguration>,
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("index requested, cookies: {:?}", cookies);
@@ -96,7 +97,7 @@ pub async fn index(
                 .elapsed()
                 .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
                 .as_secs()
-                    > (60 * 60 * 24) {
+                    > route_configuration.feed_refresh_period {
                 trace!("generating new feed for {}", account_id);
 
                 feed = model::Feed {
