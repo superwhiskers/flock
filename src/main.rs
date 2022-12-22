@@ -56,11 +56,17 @@ mod templates;
 mod util;
 
 use anyhow::Context;
-use axum::{extract::Extension, routing::get, Router};
+use axum::{
+    extract::Extension,
+    http::{header, HeaderValue},
+    routing::get,
+    Router,
+};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     ConnectOptions,
 };
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{info, log::LevelFilter, trace, warn};
 use tracing_log::LogTracer;
 use tracing_subscriber::FmtSubscriber;
@@ -128,7 +134,8 @@ async fn main() -> anyhow::Result<()> {
                                                                  )*/
         )
         .layer(Extension(sqlite.clone()))
-        .layer(Extension(config.routes));
+        .layer(Extension(config.routes))
+        .layer(SetResponseHeaderLayer::appending(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'sha256-rqswtqxEAArCqXmd0ojRzVzKn4Ybs3qW4/aqLeLAXJ0='")));
 
     //TODO(superwhiskers): add https support (this isn't necessary in production, though, as
     //                     we use nginx)

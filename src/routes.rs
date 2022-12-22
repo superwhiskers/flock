@@ -49,7 +49,7 @@ static TAG_DELIMITER_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\s*,\s*").expect("unable to compile a regex"));
 
 static TAG_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\A[[:alnum:]_\-]+\z").expect("unable to compile a regex"));
+    LazyLock::new(|| Regex::new(r"\A[[:alnum:]\-]+\z").expect("unable to compile a regex"));
 
 pub fn string_to_tags(tags: &mut str) -> Result<HashSet<&'_ str>, (StatusCode, &'static str)> {
     tags.make_ascii_lowercase();
