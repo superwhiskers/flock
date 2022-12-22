@@ -101,7 +101,7 @@ impl ToString for ScaledRatingData {
 
         //TODO(superwhiskers): is this the best display for it?
         format!(
-            "{} ± {} σ {}",
+            "{:.2} ± {:.4} σ {:.6}",
             unscaled.rating(),
             unscaled.deviation(),
             unscaled.volatility()
