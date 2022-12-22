@@ -245,14 +245,14 @@ pub async fn post_login(
                 SET_COOKIE,
                 if route_configuration.secure_cookies {
                     format!(
-                        "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly; Secure",
+                        "flock.id={}; SameSite=Strict; Expires={}; Max-Age=172800; HttpOnly; Secure",
                         account_id,
                         // lmao old browsers but why the heck not, it's hardly any effort
                         httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
                     )
                 } else {
                     format!(
-                        "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly",
+                        "flock.id={}; SameSite=Strict; Expires={}; Max-Age=172800; HttpOnly",
                         account_id,
                         // lmao old browsers but why the heck not, it's hardly any effort
                         httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
@@ -384,14 +384,14 @@ pub async fn post_signup(
             SET_COOKIE,
             if route_configuration.secure_cookies {
                 format!(
-                    "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly; Secure",
+                    "flock.id={}; SameSite=Strict; Expires={}; Max-Age=172800; HttpOnly; Secure",
                     account_id,
                     // lmao old browsers but why the heck not, it's hardly any effort
                     httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
                 )
             } else {
                 format!(
-                    "flock.id={}; SameSite=Lax; Expires={}; Max-Age=172800; HttpOnly",
+                    "flock.id={}; SameSite=Strict; Expires={}; Max-Age=172800; HttpOnly",
                     account_id,
                     // lmao old browsers but why the heck not, it's hardly any effort
                     httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(172800))
@@ -416,14 +416,14 @@ pub async fn logout(
                     SET_COOKIE,
                     if route_configuration.secure_cookies {
                         format!(
-                            "flock.id={}; SameSite=Lax; Expires={}; Max-Age=0; HttpOnly; Secure",
+                            "flock.id={}; SameSite=Strict; Expires={}; Max-Age=0; HttpOnly; Secure",
                             account_id,
                             // lmao old browsers but why the heck not, it's hardly any effort
                             httpdate::fmt_http_date(SystemTime::UNIX_EPOCH)
                         )
                     } else {
                         format!(
-                            "flock.id={}; SameSite=Lax; Expires={}; Max-Age=0; HttpOnly",
+                            "flock.id={}; SameSite=Strict; Expires={}; Max-Age=0; HttpOnly",
                             account_id,
                             // lmao old browsers but why the heck not, it's hardly any effort
                             httpdate::fmt_http_date(SystemTime::UNIX_EPOCH)
