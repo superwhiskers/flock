@@ -185,7 +185,7 @@ pub async fn index(
             trace!("sending response to {}", account_id);
 
             Ok((
-                [("Content-Type", "application/xhtml+xml")],
+                [("Content-Type", "application/xhtml+xml"), ("Cache-Control", "private, no-store")],
                 templates::Index {
                     account: Some(templates::Account {
                         id: account_id.to_string(),
@@ -203,7 +203,7 @@ pub async fn index(
         trace!("sending logged-out index");
 
         Ok((
-            [("Content-Type", "application/xhtml+xml")],
+            [("Content-Type", "application/xhtml+xml"), ("Cache-Control", "private, no-store")],
             templates::Index { account: None },
         ))
     }
