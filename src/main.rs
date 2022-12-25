@@ -46,9 +46,12 @@
 #![feature(once_cell)]
 #![feature(let_chains)]
 #![feature(int_roundings)]
+#![feature(iter_intersperse)]
+#![feature(map_try_insert)]
 
 mod configuration;
 mod feed;
+mod locks;
 mod model;
 mod rand;
 mod routes;
@@ -71,7 +74,7 @@ use tracing::{info, log::LevelFilter, trace, warn};
 use tracing_log::LogTracer;
 use tracing_subscriber::FmtSubscriber;
 
-use crate::configuration::Configuration;
+use crate::{configuration::Configuration, locks::LockMap};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -109,6 +112,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("unable to open a db connection pool")?;
 
+    let lock_map = LockMap::new();
+
     trace!("initializing the server");
 
     let app = Router::new()
@@ -118,23 +123,20 @@ async fn main() -> anyhow::Result<()> {
         .route("/logout", get(routes::logout))
         .route("/post", get(routes::get_post).post(routes::post_post))
         .route("/tags", get(routes::tags))
-        /*.route(
-            "/profile",
-            get(routes::get_profile).post(routes::post_profile),
-        )*/
+        .route("/profile", get(routes::get_profile).post(routes::post_profile))
         .nest(
             "/links/:link_id",
             Router::new()
                 .route("/", get(routes::link))
                 .route("/promote", get(routes::get_promote_link))
                 .route("/neutral", get(routes::get_neutral_link))
-                .route("/demote", get(routes::get_demote_link)), /*.route(
-                                                                     "/edit",
-                                                                     get(routes::get_edit_link).post(routes::post_edit_link),
-                                                                 )*/
+                .route("/demote", get(routes::get_demote_link))
+                // .route("/edit", get(routes::get_edit_link).post(routes::post_edit_link)),
         )
         .layer(Extension(sqlite.clone()))
         .layer(Extension(config.routes))
+        .layer(Extension(config.algorithm))
+        .layer(Extension(lock_map))
         .layer(SetResponseHeaderLayer::appending(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'sha256-rqswtqxEAArCqXmd0ojRzVzKn4Ybs3qW4/aqLeLAXJ0='")));
 
     //TODO(superwhiskers): add https support (this isn't necessary in production, though, as

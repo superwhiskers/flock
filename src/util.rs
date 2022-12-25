@@ -32,7 +32,7 @@ use std::{
 };
 use tokio::signal;
 
-use crate::model;
+use crate::{configuration::Algorithm as AlgorithmConfiguration, model};
 
 //TODO(superwhiskers): should we make these configurable?
 pub static GLICKO_2_PARAMETERS: LazyLock<Parameters> = LazyLock::new(|| {
@@ -275,6 +275,7 @@ pub fn rating_overlap(a: ScaledRatingData, b: ScaledRatingData) -> f64 {
 }
 
 pub fn decay_score(
+    algorithm_configuration: &AlgorithmConfiguration,
     score: &mut model::Score,
     period: u64,
 ) -> Result<bool, (StatusCode, &'static str)> {
@@ -310,7 +311,7 @@ pub fn decay_score(
         score.last_period += period_as_seconds * periods;
 
         true
-    } else if score.result_queue.len() >= 10 {
+    } else if score.result_queue.len() >= algorithm_configuration.rating_period {
         //TODO(superwhiskers): ditto
         glicko_2::close_player_rating_period_scaled(
             &mut score.score,

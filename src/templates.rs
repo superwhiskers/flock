@@ -62,3 +62,16 @@ pub struct EditLink {
     pub description: String,
     pub tags: String,
 }
+
+#[derive(Template)]
+#[template(path = "profile.html")]
+pub struct Profile {
+    pub profile: Option<ProfileInformation>,
+}
+
+pub struct ProfileInformation {
+    pub id: String,
+    // these are a string because they're going to be inserted within a textbox
+    //TODO(superwhiskers): consider better ways of presenting this information
+    pub tags: String,
+}

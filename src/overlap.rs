@@ -75,7 +75,7 @@ where
     }
 }
 
-/// Pick the correct bounds for overlap calculation between `s1` and `s2`, where the
+/// Pick the correct bound for overlap calculation between bounds `s1` and `s2`, where the
 /// opposing bounds are `e1` and `e2`, respectively
 pub fn choose_bound<T>(
     predicate: impl Fn(T, T) -> T,

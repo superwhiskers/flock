@@ -7,7 +7,7 @@
 
   {% match account %}
     {% when Some with (account) %}
-      logged in as {{ account.id }}
+      <span class="br">you are currently <a href="/profile">logged in</a></span>
 
       <a href="/logout">log out</a><br/>
 

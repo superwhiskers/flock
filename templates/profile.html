@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}profile{% endblock %}
+
+{% block body %}
+  {% match profile %}
+    {% when Some with (profile) %}
+      <h1>flock membership card for account {{ profile.id }}</h1>
+
+      <form method="post" action="/profile">
+        <label class="br">refresh your account id (coming soon)<input type="checkbox" name="refresh-account-id"/></label>
+        <label class="br">tags you care about (comma-delimited): <input type="text" name="tags" value="{{ profile.tags }}"/></label>
+        <button>submit</button>
+      </form>
+
+      a list of tags is available <a href="/tags">here</a>
+    {% when None %}
+      you are not logged in
+  {% endmatch %}
+{% endblock %}

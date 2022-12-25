@@ -16,6 +16,9 @@
 //  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
+//TODO(superwhiskers): this file needs a massive refactoring to reduce code duplication. i
+//                     strongly suggest leaving this alone until that is complete
+
 use axum::{
     body::Bytes,
     extract::{Form, Path},
@@ -38,8 +41,10 @@ use tracing::{debug, trace};
 use ulid::Ulid;
 
 use crate::{
-    configuration::Routes as RouteConfiguration,
-    feed, model,
+    configuration::{Algorithm as AlgorithmConfiguration, Routes as RouteConfiguration},
+    feed,
+    locks::LockMap,
+    model,
     rand::pcg_thread_rng,
     templates::{self, Link},
     util::{self, ScaledRatingData, ScaledRatingWrapper},
@@ -65,7 +70,8 @@ pub fn string_to_tags(tags: &mut str) -> Result<HashSet<&'_ str>, (StatusCode, &
 
 pub async fn index(
     Extension(sqlite): Extension<SqlitePool>,
-    Extension(route_configuration): Extension<RouteConfiguration>,
+    Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
+    Extension(lock_map): Extension<&'static LockMap>,
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("index requested, cookies: {:?}", cookies);
@@ -97,11 +103,18 @@ pub async fn index(
                 .elapsed()
                 .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
                 .as_secs()
-                    > route_configuration.feed_refresh_period {
+                    > algorithm_configuration.feed_refresh_period {
                 trace!("generating new feed for {}", account_id);
 
+                trace!("locking the account's tags");
+
+                let _tag_lock = lock_map.lock(account_id).ok_or((
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "a lock is currently held on your account's tag information. try again in a few seconds",
+                ))?;
+
                 feed = model::Feed {
-                    links: feed::generate_feed(sqlite.acquire().await.map_err(|_| {
+                    links: feed::generate_feed(&algorithm_configuration, sqlite.acquire().await.map_err(|_| {
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "unable to acquire a db connection",
@@ -321,20 +334,6 @@ pub async fn post_signup(
         )
     })?;
 
-    sqlx::query!(
-        r"INSERT INTO accounts (account_id, feed) VALUES (?, ?)",
-        account_id,
-        feed
-    )
-    .execute(&mut connection)
-    .await
-    .map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "unable to insert a new account into the db",
-        )
-    })?;
-
     for tag in tags {
         let score = ScaledRating::new(
             0.0,
@@ -378,6 +377,20 @@ pub async fn post_signup(
             )
         })?;
     }
+
+    sqlx::query!(
+        r"INSERT INTO accounts (account_id, feed) VALUES (?, ?)",
+        account_id,
+        feed
+    )
+    .execute(&mut connection)
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "unable to insert a new account into the db",
+        )
+    })?;
 
     Ok((
         AppendHeaders([(
@@ -506,21 +519,6 @@ pub async fn post_post(
 
     debug!("link id generated: {}", link_id);
 
-    sqlx::query!(
-        "INSERT INTO LINKS (link_id, link, description) VALUES (?, ?, ?)",
-        link_id,
-        link,
-        description
-    )
-    .execute(&mut connection)
-    .await
-    .map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "unable to insert the link into the db",
-        )
-    })?;
-
     //TODO(superwhiskers): this and the similar loop used in account creation (and likely
     //                     account tag modification) could be factored out
     for tag in tags {
@@ -566,6 +564,21 @@ pub async fn post_post(
             )
         })?;
     }
+
+    sqlx::query!(
+        "INSERT INTO LINKS (link_id, link, description) VALUES (?, ?, ?)",
+        link_id,
+        link,
+        description
+    )
+    .execute(&mut connection)
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "unable to insert the link into the db",
+        )
+    })?;
 
     Ok(Redirect::to("/"))
 }
@@ -678,6 +691,8 @@ pub async fn get_edit_link(
     })
 }
 
+//TODO(superwhiskers): this needs to be tweaked to rely on voting and to make it lock parts
+//                     of the db
 pub async fn post_edit_link(
     Extension(sqlite): Extension<SqlitePool>,
     Path(link_id): Path<String>,
@@ -719,6 +734,7 @@ pub async fn post_edit_link(
             .map(|t| t.as_str())
             .collect::<HashSet<_>>();
 
+        //TODO(superwhiskers): this needs to be made into a function
         for tag in &tags {
             sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
                 .execute(&mut connection)
@@ -746,7 +762,7 @@ pub async fn post_edit_link(
         })?;
 
         for tag in &old_tags - &tags {
-            sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag = ?", link_id, tag,)
+            sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag = ?", link_id, tag)
                 .execute(&mut connection)
                 .await
                 .map_err(|_| {
@@ -767,9 +783,9 @@ pub async fn post_edit_link(
                 .elapsed()
                 .map_err(|_| {
                     (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "unable to calculate the amount of time that has passed since the unix epoch",
-                )
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to calculate the amount of time that has passed since the unix epoch",
+                    )
                 })?
                 .as_secs();
 
@@ -809,32 +825,64 @@ pub async fn post_edit_link(
 
 //TODO(superwhiskers): implement link rating
 pub async fn get_promote_link(
+    Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
     Extension(sqlite): Extension<SqlitePool>,
+    Extension(lock_map): Extension<&'static LockMap>,
     cookies: Option<TypedHeader<Cookie>>,
     Path(link_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
-    rate_link(sqlite, cookies, link_id, 0.75).await
+    rate_link(
+        algorithm_configuration,
+        sqlite,
+        lock_map,
+        cookies,
+        link_id,
+        0.75,
+    )
+    .await
 }
 
 pub async fn get_neutral_link(
+    Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
     Extension(sqlite): Extension<SqlitePool>,
+    Extension(lock_map): Extension<&'static LockMap>,
     cookies: Option<TypedHeader<Cookie>>,
     Path(link_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
-    rate_link(sqlite, cookies, link_id, 0.5).await
+    rate_link(
+        algorithm_configuration,
+        sqlite,
+        lock_map,
+        cookies,
+        link_id,
+        0.5,
+    )
+    .await
 }
 
 pub async fn get_demote_link(
+    Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
     Extension(sqlite): Extension<SqlitePool>,
+    Extension(lock_map): Extension<&'static LockMap>,
     cookies: Option<TypedHeader<Cookie>>,
     Path(link_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
-    rate_link(sqlite, cookies, link_id, 0.0).await
+    rate_link(
+        algorithm_configuration,
+        sqlite,
+        lock_map,
+        cookies,
+        link_id,
+        0.0,
+    )
+    .await
 }
 
 #[inline(always)]
 pub async fn rate_link(
+    algorithm_configuration: AlgorithmConfiguration,
     sqlite: SqlitePool,
+    lock_map: &'static LockMap,
     cookies: Option<TypedHeader<Cookie>>,
     link_id: String,
     base_outcome: f64,
@@ -851,6 +899,35 @@ pub async fn rate_link(
                 "unable to acqire a db connection",
             )
         })?;
+
+        if sqlx::query_scalar!(
+            r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
+            account_id
+        )
+        .fetch_optional(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to check if an account exists",
+            )
+        })?
+        .is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "the requested account does not exist",
+            ));
+        }
+
+        let _user_tag_lock = lock_map.lock(account_id).ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a lock is currently held on your account's tag information, try again in a few seconds",
+        ))?;
+
+        let _link_tag_lock = lock_map.lock(link_id.as_str()).ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a lock is currently held on the link's tag information, try again in a few seconds",
+        ))?;
 
         //TODO(superwhiskers): same thing mentioned in src/feed.rs, but we should
         //                     additionally consider making this a function at this point
@@ -955,8 +1032,8 @@ pub async fn rate_link(
             user_score_data.result_queue.push(ScaledPlayerResult::new(link_score_data.score, user_outcome));
             link_score_data.result_queue.push(ScaledPlayerResult::new(user_score_data.score, link_outcome));
 
-            util::decay_score(&mut user_score_data, 1)?;
-            util::decay_score(&mut link_score_data, 12)?;
+            util::decay_score(&algorithm_configuration, &mut user_score_data, 1)?;
+            util::decay_score(&algorithm_configuration, &mut link_score_data, 12)?;
 
             let user_score_bin = rmp_serde::to_vec(&user_score_data).map_err(|_| {
                 (
@@ -1014,6 +1091,205 @@ pub async fn rate_link(
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unable to update the rated value",
+                )
+            })?;
+        }
+    }
+
+    Ok(Redirect::to("/"))
+}
+
+//TODO(superwhiskers): finish implementing the profile changes. we may need a lock table or something to deal with race conditions
+pub async fn get_profile(
+    Extension(sqlite): Extension<SqlitePool>,
+    cookies: Option<TypedHeader<Cookie>>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("profile requested for account, cookies: {:?}", cookies);
+
+    if let Some(cookies) = cookies
+        && let Some(account_id) = cookies.get("flock.id") {
+        debug!("account {} requesting profile information", account_id);
+
+        let mut connection = sqlite.acquire().await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to acquire a db connection",
+            )
+        })?;
+
+        let tags = sqlx::query!(
+            r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
+            account_id
+        )
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query the account's tags from the db",
+            )
+        })?;
+
+        Ok((
+            [("Content-Type", "application/xhtml+xml")],
+            templates::Profile {
+                profile: Some(templates::ProfileInformation {
+                    id: account_id.to_string(),
+                    tags: tags.iter().map(|tag| tag.tag.as_str()).intersperse(",").collect::<String>(),
+                }),
+            }
+        ))
+    } else {
+        Ok((
+            [("Content-Type", "application/xhtml+xml")],
+            templates::Profile {
+                profile: None,
+            }
+        ))
+    }
+}
+
+pub async fn post_profile(
+    Extension(sqlite): Extension<SqlitePool>,
+    Extension(lock_map): Extension<&'static LockMap>,
+    cookies: Option<TypedHeader<Cookie>>,
+    Form(model::PostProfile {
+        refresh_account_id,
+        mut tags,
+    }): Form<model::PostProfile>,
+) -> impl IntoResponse {
+    trace!(
+        "profile post-ed, tags: \"{}\", refresh_account_id: {}, cookies: {:?}",
+        tags,
+        refresh_account_id,
+        cookies
+    );
+
+    if let Some(cookies) = cookies
+        && let Some(account_id) = cookies.get("flock.id") {
+        debug!(
+            "account {} making modifications to their profile, tags: \"{}\", refresh_account_id: {}",
+            account_id,
+            tags,
+            refresh_account_id,
+        );
+
+        let mut connection = sqlite.acquire().await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to acquire a db connection",
+            )
+        })?;
+
+        if sqlx::query_scalar!(
+            r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
+            account_id
+        )
+        .fetch_optional(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to check if an account exists",
+            )
+        })?
+        .is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "the requested account does not exist",
+            ));
+        }
+
+        let tags = string_to_tags(&mut tags)?;
+
+        let _tag_lock = lock_map.lock(account_id).ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a lock is currently held on your account's tag information. try again in a few seconds",
+        ))?;
+
+        let old_tags_owned = sqlx::query_scalar!(
+            r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
+            account_id
+        )
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query the account's tags from the db",
+            )
+        })?;
+        let old_tags = old_tags_owned
+            .iter()
+            .map(|t| t.as_str())
+            .collect::<HashSet<_>>();
+
+        //TODO(superwhiskers): this and the following pieces can be factored into a function
+        //                     as noted in the function that handles post editing
+        for tag in &tags {
+            sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
+                .execute(&mut connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to insert a tag into the db",
+                    )
+                })?;
+        }
+
+        for tag in &old_tags - &tags {
+            sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag = ?", account_id, tag)
+                .execute(&mut connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to remove an old tag from the db",
+                    )
+                })?;
+        }
+
+        for tag in &tags - &old_tags {
+            let score = ScaledRating::new(
+                0.0,
+                350.0 / instant_glicko_2::constants::RATING_SCALING_RATIO,
+                0.06,
+            );
+            let last_period = SystemTime::UNIX_EPOCH
+                .elapsed()
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to calculate the amount of time that has passed since the unix epoch",
+                    )
+                })?
+                .as_secs();
+
+            let score = rmp_serde::to_vec(&model::Score {
+                score,
+                last_period,
+                result_queue: vec![],
+            })
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to convert data to messagepack",
+                )
+            })?;
+
+            sqlx::query!(
+                r"INSERT INtO scores (id, tag, score) VALUES (?, ?, ?)",
+                account_id,
+                tag,
+                score
+            )
+            .execute(&mut connection)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to insert a tag score into the db",
                 )
             })?;
         }

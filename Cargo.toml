@@ -32,6 +32,7 @@ rmp-serde = "1"
 http-body = "0.4"
 pcg_rand = "0.13"
 rand = "0.8"
+parking_lot = "0.12"
 
 [dependencies.axum]
 version = "0.6"

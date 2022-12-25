@@ -17,7 +17,7 @@
 //
 
 use instant_glicko_2::{algorithm::ScaledPlayerResult, ScaledRating};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 
 use crate::util::ScaledRatingData;
 
@@ -30,6 +30,14 @@ pub struct PostLogin {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PostSignup {
+    pub tags: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PostProfile {
+    #[serde(default = "default_checkbox", deserialize_with = "deserialize_checkbox")]
+    pub refresh_account_id: bool,
     pub tags: String,
 }
 
@@ -67,4 +75,15 @@ pub struct PostPost {
 pub struct PostEditLink {
     pub description: String,
     pub tags: String,
+}
+
+fn default_checkbox() -> bool {
+    false
+}
+
+fn deserialize_checkbox<'de, D>(_: D) -> Result<bool, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    Ok(true)
 }

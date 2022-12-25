@@ -23,15 +23,17 @@ use std::collections::{HashMap, HashSet};
 use tracing::{debug, trace};
 
 use crate::{
+    configuration::Algorithm as AlgorithmConfiguration,
     model,
     rand::pcg_thread_rng,
     util::{self, ScaledRatingData, ScaledRatingWrapper},
 };
 
 //TODO(superwhiskers): this is all pretty suboptimal. pass over it and optimize it
-pub async fn generate_feed(
+pub async fn generate_feed<'a>(
+    algorithm_configuration: &'a AlgorithmConfiguration,
     mut connection: PoolConnection<Sqlite>,
-    account_id: &str,
+    account_id: &'a str,
 ) -> Result<Vec<(String, ScaledRatingData)>, (StatusCode, &'static str)> {
     trace!("generating feed for account {}", account_id);
 
@@ -119,7 +121,7 @@ pub async fn generate_feed(
     };
 
     for (ref tag, ref mut score) in &mut tags {
-        if util::decay_score(score, 1)? {
+        if util::decay_score(&algorithm_configuration, score, 1)? {
             let score = rmp_serde::to_vec(&*score).map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -195,7 +197,7 @@ pub async fn generate_feed(
         let mut overlap = 0.0; // there will always be overlap.
         for (tag, mut score) in candidate_tags {
             if let Some(percentage) = tag_importance.get(&tag) {
-                if util::decay_score(&mut score, 12)? {
+                if util::decay_score(&algorithm_configuration, &mut score, 12)? {
                     let score = rmp_serde::to_vec(&score).map_err(|_| {
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,

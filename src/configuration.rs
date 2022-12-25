@@ -41,6 +41,10 @@ pub struct Configuration {
     /// The `route` section of the configuration
     #[serde(default)]
     pub routes: Routes,
+
+    /// The `algorithm` section of the configuration
+    #[serde(default)]
+    pub algorithm: Algorithm,
 }
 
 impl Configuration {
@@ -165,17 +169,12 @@ pub struct Routes {
     /// Whether or not to enforce that cookies be set only to secure origins
     #[serde(default = "default_secure_cookies")]
     pub secure_cookies: bool,
-
-    /// The refresh period for the feed, in seconds
-    #[serde(default = "default_feed_refresh_period")]
-    pub feed_refresh_period: u64,
 }
 
 impl Default for Routes {
     fn default() -> Self {
         Self {
             secure_cookies: default_secure_cookies(),
-            feed_refresh_period: default_feed_refresh_period(),
         }
     }
 }
@@ -186,9 +185,37 @@ fn default_secure_cookies() -> bool {
     false
 }
 
-/// The default value for the `feed_refresh_period` field in the [`Routes`] configuration section
+/// Configuration pertaining to the algorithm
+#[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct Algorithm {
+    /// The refresh period for the feed, in seconds
+    #[serde(default = "default_feed_refresh_period")]
+    pub feed_refresh_period: u64,
+
+    /// The rating period, in terms of number of ratings made
+    #[serde(default = "default_rating_period")]
+    pub rating_period: usize,
+}
+
+impl Default for Algorithm {
+    fn default() -> Self {
+        Self {
+            feed_refresh_period: default_feed_refresh_period(),
+            rating_period: default_rating_period(),
+        }
+    }
+}
+
+/// The default value for the `feed_refresh_period` field in the [`Algorithm`] configuration section
 #[inline(always)]
 fn default_feed_refresh_period() -> u64 {
     // 24 hours
     60 * 60 * 24
+}
+
+/// The default value for the `rating_period` field in the [`Algorithm`] configuration section
+#[inline(always)]
+fn default_rating_period() -> usize {
+    // 10 links
+    10
 }
