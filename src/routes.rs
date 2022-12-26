@@ -919,6 +919,27 @@ pub async fn rate_link(
             ));
         }
 
+        if sqlx::query_scalar!(
+            r#"SELECT 1 FROM links where link_id = ?"#,
+            link_id
+        )
+        .fetch_optional(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to check if a link exists",
+            )
+        })?
+        .is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "the requested link does not exist",
+            ));
+        }
+
+        debug!("rating link {} / account {}", link_id, account_id);
+
         let _user_tag_lock = lock_map.lock(account_id).ok_or((
             StatusCode::SERVICE_UNAVAILABLE,
             "a lock is currently held on your account's tag information, try again in a few seconds",
@@ -1022,12 +1043,15 @@ pub async fn rate_link(
                     (base_outcome, tweaked_outcome)
                 };
 
+
                 if comparative_volatility == Ordering::Less {
                     (favorable_outcome, unfavorable_outcome)
                 } else {
                     (unfavorable_outcome, favorable_outcome)
                 }
             };
+
+            debug!("link outcome: {}, user outcome: {}", link_outcome, user_outcome);
 
             user_score_data.result_queue.push(ScaledPlayerResult::new(link_score_data.score, user_outcome));
             link_score_data.result_queue.push(ScaledPlayerResult::new(user_score_data.score, link_outcome));
