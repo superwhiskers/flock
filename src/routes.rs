@@ -1099,6 +1099,88 @@ pub async fn rate_link(
     Ok(Redirect::to("/"))
 }
 
+pub async fn get_profile_tags(
+    Extension(sqlite): Extension<SqlitePool>,
+    cookies: Option<TypedHeader<Cookie>>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("profile tag information requested, cookies: {:?}", cookies);
+
+    if let Some(cookies) = cookies
+        && let Some(account_id) = cookies.get("flock.id") {
+        debug!("account {} requesting profile tag information", account_id);
+
+        let mut connection = sqlite.acquire().await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to acquire a db connection",
+            )
+        })?;
+
+        if sqlx::query_scalar!(
+            r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
+            account_id
+        )
+        .fetch_optional(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to check if an account exists",
+            )
+        })?
+        .is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "the requested account does not exist",
+            ));
+        }
+
+        let tags = sqlx::query!(
+            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            account_id
+        )
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query the account's tags from the db",
+            )
+        })?
+        .into_iter()
+        .map(|tag| {
+            rmp_serde::from_slice(&tag.score)
+                .map(|score: model::Score| <ScaledRatingWrapper as Into<ScaledRatingData>>::into(ScaledRatingWrapper(score.score)).to_string())
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to deserialize the score data for a tag",
+                    )
+                })
+                .map(|score| {
+                    templates::Tag {
+                        name: tag.tag,
+                        score,
+                    }
+                })
+        }).collect::<Result<Vec<templates::Tag>, _>>()?;
+
+        return Ok((
+            [("Content-Type", "application/xhtml+xml")],
+            templates::TagScores {
+                id: account_id.to_string(),
+                tags,
+            }
+        ));
+    }
+
+    Err((
+        StatusCode::BAD_REQUEST,
+        "you are not logged in",
+    ))
+}
+
+
 //TODO(superwhiskers): finish implementing the profile changes. we may need a lock table or something to deal with race conditions
 pub async fn get_profile(
     Extension(sqlite): Extension<SqlitePool>,
@@ -1133,18 +1215,16 @@ pub async fn get_profile(
         Ok((
             [("Content-Type", "application/xhtml+xml")],
             templates::Profile {
-                profile: Some(templates::ProfileInformation {
+                profile: templates::ProfileInformation {
                     id: account_id.to_string(),
                     tags: tags.iter().map(|tag| tag.tag.as_str()).intersperse(",").collect::<String>(),
-                }),
+                },
             }
         ))
     } else {
-        Ok((
-            [("Content-Type", "application/xhtml+xml")],
-            templates::Profile {
-                profile: None,
-            }
+        Err((
+            StatusCode::BAD_REQUEST,
+            "you are not logged in",
         ))
     }
 }

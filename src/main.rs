@@ -123,7 +123,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/logout", get(routes::logout))
         .route("/post", get(routes::get_post).post(routes::post_post))
         .route("/tags", get(routes::tags))
-        .route("/profile", get(routes::get_profile).post(routes::post_profile))
+        .nest(
+            "/profile",
+            Router::new()
+                .route("/", get(routes::get_profile).post(routes::post_profile))
+                .route("/tags", get(routes::get_profile_tags))
+        )
         .nest(
             "/links/:link_id",
             Router::new()

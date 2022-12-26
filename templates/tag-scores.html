@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}tag-scores{% endblock %}
+
+{% block body %}
+  <h1>tag scores for id {{ id }}</h1>
+
+  <ul class="list">
+    {% for tag in tags %}
+      <li>{{ tag.name }} | {{ tag.score }}</li>
+    {% endfor %}
+  </ul>
+{% endblock %}

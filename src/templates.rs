@@ -52,6 +52,18 @@ pub struct Tags {
 }
 
 #[derive(Template)]
+#[template(path = "tag-scores.html")]
+pub struct TagScores {
+    pub id: String,
+    pub tags: Vec<Tag>,
+}
+
+pub struct Tag {
+    pub name: String,
+    pub score: String,
+}
+
+#[derive(Template)]
 #[template(path = "post.html")]
 pub struct Post;
 
@@ -66,7 +78,7 @@ pub struct EditLink {
 #[derive(Template)]
 #[template(path = "profile.html")]
 pub struct Profile {
-    pub profile: Option<ProfileInformation>,
+    pub profile: ProfileInformation,
 }
 
 pub struct ProfileInformation {
