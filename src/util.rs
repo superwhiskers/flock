@@ -31,6 +31,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::signal;
+use tracing::debug;
 
 use crate::{configuration::Algorithm as AlgorithmConfiguration, model};
 
@@ -279,6 +280,8 @@ pub fn decay_score(
     score: &mut model::Score,
     period: u64,
 ) -> Result<bool, (StatusCode, &'static str)> {
+    debug!("checking decay for score {:?} with a time period of {} and an algorithm configuration of {:?}", score, period, algorithm_configuration);
+
     let period_as_seconds = 60 * 60 * 24 * 30 * period;
 
     let periods =
@@ -294,6 +297,7 @@ pub fn decay_score(
                 / period_as_seconds;
 
     Ok(if periods != 0 {
+        debug!("updating an old score");
         for i in 0..periods {
             glicko_2::close_player_rating_period_scaled(
                 &mut score.score,
@@ -312,6 +316,7 @@ pub fn decay_score(
 
         true
     } else if score.result_queue.len() >= algorithm_configuration.rating_period {
+        debug!("updating a score that has exceeded the threshold for a rating period");
         //TODO(superwhiskers): ditto
         glicko_2::close_player_rating_period_scaled(
             &mut score.score,
