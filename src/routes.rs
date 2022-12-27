@@ -1012,12 +1012,12 @@ pub async fn rate_link(
 
         for tag in HashSet::intersection(&user_tags, &link_tags) {
             let (mut user_score_data, mut link_score_data) = user_scores.get(*tag).cloned().zip(link_scores.get(*tag).cloned()).unwrap();
-            let (user_score, link_score) =
+            let (user_score, link_score): (ScaledRatingData, ScaledRatingData) =
                 (
                     ScaledRatingWrapper(user_score_data.score).into(),
                     ScaledRatingWrapper(link_score_data.score).into(),
                 );
-            let comparative_volatility = ScaledRatingData::cmp_volatility(&user_score, &link_score).ok_or((
+            let comparative_volatility = user_score.partial_cmp(&link_score).ok_or((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "unable to compare the volatilities of scores",
             ))?;
@@ -1036,7 +1036,7 @@ pub async fn rate_link(
                      user_score.deviation + link_score.deviation + (user_score.rating - link_score.rating).abs()
                 };
 
-                let tweaked_outcome = base_outcome + (0.25 * percent_overlap);
+                let tweaked_outcome = base_outcome + (if base_outcome == 0.0 { 0.75 } else { 0.25 } * percent_overlap).max(0.0);
                 let (favorable_outcome, unfavorable_outcome) = if tweaked_outcome > base_outcome {
                     (tweaked_outcome, base_outcome)
                 } else {
@@ -1198,12 +1198,8 @@ pub async fn get_profile_tags(
         ));
     }
 
-    Err((
-        StatusCode::BAD_REQUEST,
-        "you are not logged in",
-    ))
+    Err((StatusCode::BAD_REQUEST, "you are not logged in"))
 }
-
 
 //TODO(superwhiskers): finish implementing the profile changes. we may need a lock table or something to deal with race conditions
 pub async fn get_profile(
