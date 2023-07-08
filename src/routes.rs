@@ -91,7 +91,7 @@ pub async fn index(
             r#"SELECT feed as "feed!" FROM accounts WHERE account_id = ?"#,
             account_id
         )
-        .fetch_optional(&mut connection)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
         {
@@ -146,7 +146,7 @@ pub async fn index(
                     serialized_feed,
                     account_id
                 )
-                .execute(&mut connection)
+                .execute(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -162,7 +162,7 @@ pub async fn index(
                     r#"SELECT description as "description!" FROM links WHERE link_id = ?"#,
                     link_id,
                 )
-                .fetch_one(&mut connection)
+                .fetch_one(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -177,7 +177,7 @@ pub async fn index(
                     account_id,
                     link_id,
                 )
-                .fetch_optional(&mut connection)
+                .fetch_optional(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -247,7 +247,7 @@ pub async fn post_login(
         r"SELECT COUNT(1) as count FROM accounts WHERE account_id = ?",
         account_id
     )
-    .fetch_one(&mut connection)
+    .fetch_one(&mut *connection)
     .await
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
     .count
@@ -309,7 +309,7 @@ pub async fn post_signup(
 
     for tag in &tags {
         sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -368,7 +368,7 @@ pub async fn post_signup(
             tag,
             score,
         )
-        .execute(&mut connection)
+        .execute(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -383,7 +383,7 @@ pub async fn post_signup(
         account_id,
         feed
     )
-    .execute(&mut connection)
+    .execute(&mut *connection)
     .await
     .map_err(|_| {
         (
@@ -463,7 +463,7 @@ pub async fn tags(
     })?;
 
     let tags = sqlx::query_scalar!(r#"SELECT tag as "tag!" FROM tags"#)
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -505,7 +505,7 @@ pub async fn post_post(
 
     for tag in &tags {
         sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -555,7 +555,7 @@ pub async fn post_post(
             tag,
             score,
         )
-        .execute(&mut connection)
+        .execute(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -571,7 +571,7 @@ pub async fn post_post(
         link,
         description
     )
-    .execute(&mut connection)
+    .execute(&mut *connection)
     .await
     .map_err(|_| {
         (
@@ -605,7 +605,7 @@ pub async fn link(
         r#"SELECT link as "link!" FROM links WHERE link_id = ?"#,
         link_id
     )
-    .fetch_optional(&mut connection)
+    .fetch_optional(&mut *connection)
     .await
     .map_err(|_| {
         (
@@ -623,7 +623,7 @@ pub async fn link(
             r"SELECT COUNT(1) as count FROM accounts WHERE account_id = ?",
             account_id
         )
-        .fetch_one(&mut connection)
+        .fetch_one(&mut *connection)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
         .count
@@ -632,7 +632,7 @@ pub async fn link(
             sqlx::query!(
                 "INSERT OR IGNORE INTO seen (account_id, link_id, rated) VALUES (?, ?, false)",
                 account_id, link_id
-            ).execute(&mut connection).await.map_err(|_| {
+            ).execute(&mut *connection).await.map_err(|_| {
                 (StatusCode::INTERNAL_SERVER_ERROR, "unable to mark this link as seen")
             })?;
 
@@ -664,7 +664,7 @@ pub async fn get_edit_link(
         r#"SELECT description as "description!" FROM links WHERE link_id = ?"#,
         link_id
     )
-    .fetch_optional(&mut connection)
+    .fetch_optional(&mut *connection)
     .await
     .map_err(|_| {
         (
@@ -675,7 +675,7 @@ pub async fn get_edit_link(
     .ok_or((StatusCode::BAD_REQUEST, "the requested link does not exist"))?;
 
     let tags = sqlx::query_scalar!(r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#, link_id)
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -712,7 +712,7 @@ pub async fn post_edit_link(
         r"SELECT COUNT(1) as count FROM links WHERE link_id = ?",
         link_id
     )
-    .fetch_one(&mut connection)
+    .fetch_one(&mut *connection)
     .await
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
     .count
@@ -721,7 +721,7 @@ pub async fn post_edit_link(
         let tags = string_to_tags(&mut tags)?;
         let old_tags_owned =
             sqlx::query_scalar!(r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#, link_id)
-                .fetch_all(&mut connection)
+                .fetch_all(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -737,7 +737,7 @@ pub async fn post_edit_link(
         //TODO(superwhiskers): this needs to be made into a function
         for tag in &tags {
             sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-                .execute(&mut connection)
+                .execute(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -752,7 +752,7 @@ pub async fn post_edit_link(
             description,
             link_id
         )
-        .execute(&mut connection)
+        .execute(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -763,7 +763,7 @@ pub async fn post_edit_link(
 
         for tag in &old_tags - &tags {
             sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag = ?", link_id, tag)
-                .execute(&mut connection)
+                .execute(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -807,7 +807,7 @@ pub async fn post_edit_link(
                 tag,
                 score,
             )
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -904,7 +904,7 @@ pub async fn rate_link(
             r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
             account_id
         )
-        .fetch_optional(&mut connection)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -923,7 +923,7 @@ pub async fn rate_link(
             r#"SELECT 1 FROM links where link_id = ?"#,
             link_id
         )
-        .fetch_optional(&mut connection)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -956,7 +956,7 @@ pub async fn rate_link(
             r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
             account_id
         )
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -981,7 +981,7 @@ pub async fn rate_link(
             r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
             link_id
         )
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -1072,7 +1072,7 @@ pub async fn rate_link(
                 account_id,
                 tag
             )
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -1094,7 +1094,7 @@ pub async fn rate_link(
                 link_id,
                 tag
             )
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -1109,7 +1109,7 @@ pub async fn rate_link(
                 account_id,
                 link_id
             )
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -1144,7 +1144,7 @@ pub async fn get_profile_tags(
             r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
             account_id
         )
-        .fetch_optional(&mut connection)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -1163,7 +1163,7 @@ pub async fn get_profile_tags(
             r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
             account_id
         )
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -1223,7 +1223,7 @@ pub async fn get_profile(
             r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
             account_id
         )
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -1285,7 +1285,7 @@ pub async fn post_profile(
             r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
             account_id
         )
-        .fetch_optional(&mut connection)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -1311,7 +1311,7 @@ pub async fn post_profile(
             r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
             account_id
         )
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -1328,7 +1328,7 @@ pub async fn post_profile(
         //                     as noted in the function that handles post editing
         for tag in &tags {
             sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-                .execute(&mut connection)
+                .execute(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -1340,7 +1340,7 @@ pub async fn post_profile(
 
         for tag in &old_tags - &tags {
             sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag = ?", account_id, tag)
-                .execute(&mut connection)
+                .execute(&mut *connection)
                 .await
                 .map_err(|_| {
                     (
@@ -1384,7 +1384,7 @@ pub async fn post_profile(
                 tag,
                 score
             )
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (

@@ -43,7 +43,7 @@
 #![deny(clippy::single_match_else)]
 #![deny(clippy::option_option)]
 #![deny(clippy::mut_mut)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(int_roundings)]
 #![feature(iter_intersperse)]
@@ -102,12 +102,10 @@ async fn main() -> anyhow::Result<()> {
 
     let sqlite = sqlite_pool_options
         .connect_with({
-            let mut options = SqliteConnectOptions::new()
+            SqliteConnectOptions::new()
                 .filename(&config.sqlite.path)
-                .create_if_missing(config.sqlite.create_if_missing);
-            options.log_statements(LevelFilter::Debug);
-
-            options
+                .create_if_missing(config.sqlite.create_if_missing)
+                .log_statements(LevelFilter::Debug)
         })
         .await
         .context("unable to open a db connection pool")?;

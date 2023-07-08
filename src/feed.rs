@@ -43,7 +43,7 @@ pub async fn generate_feed<'a>(
         r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
         account_id
     )
-    .fetch_all(&mut connection)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|_| {
         (
@@ -70,7 +70,7 @@ pub async fn generate_feed<'a>(
                 account_id,
                 tag
             )
-            .fetch_all(&mut connection)
+            .fetch_all(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -93,7 +93,7 @@ pub async fn generate_feed<'a>(
         r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
         account_id
     )
-    .fetch_all(&mut connection)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|_| {
         (
@@ -135,7 +135,7 @@ pub async fn generate_feed<'a>(
                 account_id,
                 tag
             )
-            .execute(&mut connection)
+            .execute(&mut *connection)
             .await
             .map_err(|_| {
                 (
@@ -168,7 +168,7 @@ pub async fn generate_feed<'a>(
             r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
             candidate,
         )
-        .fetch_all(&mut connection)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
             (
@@ -211,7 +211,7 @@ pub async fn generate_feed<'a>(
                         candidate,
                         tag
                     )
-                    .execute(&mut connection)
+                    .execute(&mut *connection)
                     .await
                     .map_err(|_| {
                         (

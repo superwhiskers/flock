@@ -39,13 +39,11 @@ version = "0.6"
 features = ["form", "http1", "http2", "tower-log", "headers"]
 
 [dependencies.askama]
-version = "0.11"
-git = "https://github.com/djc/askama.git"
+version = "0.12"
 features = ["with-axum"]
 
 [dependencies.askama_axum]
-version = "0.1"
-git = "https://github.com/djc/askama.git"
+version = "0.3"
 
 [dependencies."instant-glicko-2"]
 version = "0.1"
@@ -57,7 +55,7 @@ version = "0.4"
 features = ["full"]
 
 [dependencies.tower-http]
-version = "0.3"
+version = "0.4"
 features = ["set-header"]
 
 [dependencies.tokio]
@@ -73,5 +71,5 @@ version = "0.3"
 features = ["parking_lot", "env-filter"]
 
 [dependencies.sqlx]
-version = "0.6"
-features = ["runtime-tokio-rustls", "sqlite", "offline"]
+version = "0.7"
+features = ["runtime-tokio-rustls", "sqlite"]
