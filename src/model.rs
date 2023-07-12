@@ -98,6 +98,7 @@ pub struct Login {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct FeedXml {
     pub account_id: String,
 }
