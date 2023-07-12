@@ -15,7 +15,7 @@
 
   {% match account %}
     {% when Some with (account) %}
-      <ul>
+      <ul id="user-actions">
         <li><a href="/profile">profile</a></li>
         <li><a href="/logout">log out</a></li>
       </ul>
@@ -59,7 +59,7 @@
         {% endfor %}
       </dl>
     {% when None %}
-      <ul>
+      <ul id="user-actions">
         <li><a href="/login">log in</a></li>
         <li><a href="/signup">sign up</a></li>
       </ul>
