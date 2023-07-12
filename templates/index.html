@@ -15,41 +15,53 @@
 
   {% match account %}
     {% when Some with (account) %}
-      <span class="br">you are currently <a href="/profile">logged in</a></span>
-
-      <a href="/logout">log out</a><br/>
+      <ul>
+        <li><a href="/profile">profile</a></li>
+        <li><a href="/logout">log out</a></li>
+      </ul>
 
       <h2>your feed</h2>
 
-      <ul>
+      <dl id="feed">
         {% for link in account.links %}
-          <li>
-            <a href="/links/{{ link.id }}">{{ link.description }}</a>
+          <dt>
+            <a class="link-description" href="/links/{{ link.id }}">{{ link.description }}</a>
+          </dt>
 
-            {% if !link.rated %}
-              {% if link.visited %}
-                | <a href="/links/{{ link.id }}/promote">promote</a>
-                <a href="/links/{{ link.id }}/neutral">neutral</a>
-                <a href="/links/{{ link.id }}/demote">demote</a>
-                {# <a href="/links/{{ link.id }}/edit">edit</a> #}
-              {% endif %}
+          {% if !link.rated %}
+            {% if link.visited %}
+              <dd class="link-actions">
+                <ul>
+                  <li>
+                    <a class="link-promote" href="/links/{{ link.id }}/promote">promote</a>
+                  </li>
+                  <li>
+                    <a class="link-neutral" href="/links/{{ link.id }}/neutral">neutral</a>
+                  </li>
+                  <li>
+                    <a class="link-demote" href="/links/{{ link.id }}/demote">demote</a>
+                  </li>
+                  {#
+                    <li>
+                      <a class="link-edit" href="/links/{{ link.id }}/edit">edit</a>
+                    </li>
+                  #}
+                </ul>
+              </dd>
             {% endif %}
+          {% endif %}
 
-            {% match link.rating %}
-              {% when Some with (rating) %}
-                <span>| {{ rating }}</span>
-              {% when None %}
-            {% endmatch %}
-          </li>
+          {% match link.rating %}
+            {% when Some with (rating) %}
+              <dd class="link-score score">{{ rating }}</dd>
+            {% when None %}
+          {% endmatch %}
         {% endfor %}
-      </ul>
+      </dl>
     {% when None %}
-      <a href="/login" class="br">log in</a>
-      <a href="/signup">sign up</a>
+      <ul>
+        <li><a href="/login">log in</a></li>
+        <li><a href="/signup">sign up</a></li>
+      </ul>
   {% endmatch %}
-
-  <h2>miscellaneous</h2>
-
-  <a href="/tags" class="br">current tags</a>
-  <a href="/post">post a link</a>
 {% endblock %}

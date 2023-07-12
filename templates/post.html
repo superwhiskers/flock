@@ -3,14 +3,24 @@
 {% block title %}post{% endblock %}
 
 {% block body %}
-  <h1>make a post on flock</h1>
+  <h1>post</h1>
 
   <form method="post" action="/post">
-    <label class="br">link: <input type="text" name="link"/></label>
-    <label class="br">description: <input type="text" name="description"/></label>
-    <label class="br">tags (comma-delimited): <input type="text" name="tags"/></label>
+    <div>
+      <label for="link">link:</label>
+      <input type="text" id="link" name="link"/>
+    </div>
+
+    <div>
+      <label for="description">description:</label>
+      <input type="text" id="description" name="description"/>
+    </div>
+
+    <div>
+      <label for="tags">tags (comma-delimited):</label>
+      <input type="text" id="tags" name="tags"/>
+    </div>
+
     <button>submit</button>
   </form>
-
-  a list of tags is available <a href="/tags">here</a>
 {% endblock %}

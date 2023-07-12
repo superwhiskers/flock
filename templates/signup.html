@@ -3,12 +3,14 @@
 {% block title %}signup{% endblock %}
 
 {% block body %}
-  <h1>create an account on flock</h1>
+  <h1>sign up</h1>
 
   <form method="post" action="/signup">
-    <label class="br">tags you care about (comma-delimited): <input type="text" name="tags"/></label>
-    <button>submit</button>
-  </form>
+      <div>
+        <label for="tags">tags you care about (comma-delimited):</label>
+        <input type="text" id="tags" name="tags"/>
+      </div>
 
-  a list of tags is available <a href="/tags">here</a>
+      <button>submit</button>
+  </form>
 {% endblock %}

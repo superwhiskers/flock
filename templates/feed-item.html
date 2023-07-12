@@ -1,3 +1,13 @@
-<a href="{{ flock_host }}/login?redirect-to=%2Flinks%2F{{ link_id }}%2Fpromote">promote</a>
-<a href="{{ flock_host }}/login?redirect-to=%2Flinks%2F{{ link_id }}%2Fneutral">neutral</a>
-<a href="{{ flock_host }}/login?redirect-to=%2Flinks%2F{{ link_id }}%2Fdemote">demote</a>
+<div class="link-actions">
+  <ul>
+    <li>
+      <a class="link-promote" href="{{ flock_host }}/login?redirect-to=%2Flinks%2F{{ link_id }}%2Fpromote">promote</a>
+    </li>
+    <li>
+      <a class="link-neutral" href="{{ flock_host }}/login?redirect-to=%2Flinks%2F{{ link_id }}%2Fneutral">neutral</a>
+    </li>
+    <li>
+      <a class="link-demote" href="{{ flock_host }}/login?redirect-to=%2Flinks%2F{{ link_id }}%2Fdemote">demote</a>
+    </li>
+  </ul>
+</dd>

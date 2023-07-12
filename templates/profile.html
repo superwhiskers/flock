@@ -3,15 +3,28 @@
 {% block title %}profile{% endblock %}
 
 {% block body %}
-  <h1>flock membership card for account {{ profile.id }}</h1>
+  <h1>profile for account <span class="account-id id">{{ profile.id }}</span></h1>
+
+  <h2>settings</h2>
 
   <form method="post" action="/profile">
-    <label class="br">refresh your account id (coming soon)<input type="checkbox" name="refresh-account-id"/></label>
-    <label class="br">tags you care about (comma-delimited): <input type="text" name="tags" value="{{ profile.tags }}"/></label>
+    <div>
+      <label for="refresh-account-id">refresh your account id (coming soon)</label>
+      <input type="checkbox" id="refresh-account-id" name="refresh-account-id"/>
+    </div>
+
+    <div>
+      <label for="tags">tags you care about (comma-delimited):</label>
+      <input type="text" id="tags" name="tags" value="{{ profile.tags }}"/>
+    </div>
+
     <button>submit</button>
   </form>
 
-  <span class="br">an rss feed is available <a href="/feed.xml?account-id={{ profile.id }}">here</a></span>
-  <span class="br">a list of tags is available <a href="/tags">here</a></span>
-  your tag scores can be found <a href="/profile/tags">here</a>
+  <h2>miscellaneous</h2>
+
+  <ul>
+    <li>an rss feed is available <a href="/feed.xml?account-id={{ profile.id }}">here</a></li>
+    <li>your tag scores can be found <a href="/profile/tags">here</a></li>
+  </ul>
 {% endblock %}

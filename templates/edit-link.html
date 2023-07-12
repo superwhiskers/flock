@@ -3,13 +3,19 @@
 {% block title %}edit-link{% endblock %}
 
 {% block body %}
-  <h1>edit a link on flock</h1>
+  <h1>editing link <span class="link-id id">{{ id }}</span></h1>
 
   <form method="post" action="/links/{{ id }}/edit">
-    <label class="br">description: <input type="text" name="description" value="{{ description }}"/></label>
-    <label class="br">tags (comma-delimited): <input type="text" name="tags" value="{{ tags }}"/></label>
+    <div>
+      <label for="description">description:</label>
+      <input type="text" id="description" name="description" value="{{ description }}"/>
+    </div>
+
+    <div>
+      <label for="tags">tags (comma-delimited):</label>
+      <input type="text" id="tags" name="tags" value="{{ tags }}"/>
+    </div>
+
     <button>submit</button>
   </form>
-
-  a list of tags is available <a href="/tags">here</a>
 {% endblock %}

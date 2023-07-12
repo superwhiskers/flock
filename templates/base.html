@@ -5,13 +5,22 @@
 
     <title>flock :: {% block title %}{% endblock %}</title>
 
-    <style>
-      .br { display: block; }
-    </style>
-
     {% block head %}{% endblock %}
   </head>
   <body>
     {% block body %}{% endblock %}
+
+    <footer>
+      <h2>navigation</h2>
+
+      <nav id="site-navigation">
+        <ul>
+          <li><a href="/">index</a></li>
+          <li><a href="/post">post</a></li>
+          <li><a href="/tags">tags</a></li>
+          <li><a href="/about">about</a></li>
+        </ul>
+      </nav>
+    </footer>
   </body>
 </html>

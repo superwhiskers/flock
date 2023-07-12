@@ -3,11 +3,12 @@
 {% block title %}tag-scores{% endblock %}
 
 {% block body %}
-  <h1>tag scores for id {{ id }}</h1>
+  <h1>tag scores for account <span class="account-id id">{{ id }}</span></h1>
 
-  <ul class="list">
+  <dl id="tag-scores">
     {% for tag in tags %}
-      <li>{{ tag.name }} | {{ tag.score }}</li>
+      <dt class="tag-name">{{ tag.name }}</dt>
+      <dd class="tag-score score">{{ tag.score }}</dd>
     {% endfor %}
-  </ul>
+  </dl>
 {% endblock %}
