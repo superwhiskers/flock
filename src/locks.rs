@@ -61,7 +61,7 @@ impl LockMap {
             } else {
                 debug!("successfully locked for key \"{}\"", key);
 
-                Some(LockMapGuard(&self, key.to_string()))
+                Some(LockMapGuard(self, key.to_string()))
             }
         } else {
             trace!("creating new lock for key \"{}\"", key);
@@ -82,7 +82,7 @@ impl LockMap {
             .try_insert(key.to_string(), AtomicBool::new(true))
             .is_ok()
         {
-            Some(LockMapGuard(&self, key.to_string()))
+            Some(LockMapGuard(self, key.to_string()))
         } else {
             None
         }

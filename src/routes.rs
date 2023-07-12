@@ -19,9 +19,10 @@
 //TODO(superwhiskers): this file needs a massive refactoring to reduce code duplication. i
 //                     strongly suggest leaving this alone until that is complete
 
+use askama::Template;
 use axum::{
     body::Bytes,
-    extract::{Form, Path},
+    extract::{Form, Path, Query},
     headers::Cookie,
     http::{header::SET_COOKIE, Response, StatusCode},
     response::{AppendHeaders, IntoResponse, Redirect},
@@ -41,7 +42,10 @@ use tracing::{debug, trace};
 use ulid::Ulid;
 
 use crate::{
-    configuration::{Algorithm as AlgorithmConfiguration, Routes as RouteConfiguration},
+    configuration::{
+        Algorithm as AlgorithmConfiguration, Http as HttpConfiguration,
+        Routes as RouteConfiguration,
+    },
     feed,
     locks::LockMap,
     model,
@@ -68,7 +72,7 @@ pub fn string_to_tags(tags: &mut str) -> Result<HashSet<&'_ str>, (StatusCode, &
     Ok(tags)
 }
 
-pub async fn index(
+pub async fn get_index(
     Extension(sqlite): Extension<SqlitePool>,
     Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
     Extension(lock_map): Extension<&'static LockMap>,
@@ -222,16 +226,31 @@ pub async fn index(
     }
 }
 
-pub async fn get_login() -> impl IntoResponse {
-    (
-        [("Content-Type", "application/xhtml+xml")],
-        templates::Login,
-    )
+pub async fn get_login(
+    Query(model::Login { redirect_to }): Query<model::Login>,
+    cookies: Option<TypedHeader<Cookie>>,
+) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
+    if let Some(cookies) = cookies
+        && cookies.get("flock.id").is_some() {
+        if let Some(url) = redirect_to {
+            Redirect::to(&url)
+        } else {
+            Redirect::to("/")
+        }
+        .into_response()
+    } else {
+        (
+            [("Content-Type", "application/xhtml+xml")],
+            templates::Login { redirect_to },
+        )
+        .into_response()
+    }
 }
 
 pub async fn post_login(
     Extension(sqlite): Extension<SqlitePool>,
     Extension(route_configuration): Extension<RouteConfiguration>,
+    Query(model::Login { redirect_to }): Query<model::Login>,
     Form(model::PostLogin { account_id }): Form<model::PostLogin>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("login post-ed with account id {}", account_id);
@@ -272,7 +291,11 @@ pub async fn post_login(
                     )
                 },
             )]),
-            Redirect::to("/"),
+            if let Some(url) = redirect_to {
+                Redirect::to(&url)
+            } else {
+                Redirect::to("/")
+            },
         ))
     } else {
         Err((
@@ -415,7 +438,7 @@ pub async fn post_signup(
     ))
 }
 
-pub async fn logout(
+pub async fn get_logout(
     cookies: Option<TypedHeader<Cookie>>,
     Extension(route_configuration): Extension<RouteConfiguration>,
 ) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
@@ -452,7 +475,7 @@ pub async fn logout(
     }
 }
 
-pub async fn tags(
+pub async fn get_tags(
     Extension(sqlite): Extension<SqlitePool>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     let mut connection = sqlite.acquire().await.map_err(|_| {
@@ -1396,4 +1419,175 @@ pub async fn post_profile(
     }
 
     Ok(Redirect::to("/"))
+}
+
+pub async fn get_feed_xml(
+    Extension(sqlite): Extension<SqlitePool>,
+    Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
+    Extension(lock_map): Extension<&'static LockMap>,
+    Extension(http_configuration): Extension<HttpConfiguration>,
+    Query(model::FeedXml { account_id }): Query<model::FeedXml>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("feed.xml requested, account id: {}", &account_id);
+
+    //TODO(superwhiskers): factor out this and the body of the get_index function into a
+    //                     separate function or something
+    if !account_id.is_empty() {
+        trace!("preparing feed.xml for {}", &account_id);
+
+        let mut connection = sqlite.acquire().await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to acquire a db connection",
+            )
+        })?;
+
+        if let Some(feed) = sqlx::query_scalar!(
+            r#"SELECT feed as "feed!" FROM accounts WHERE account_id = ?"#,
+            account_id
+        )
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
+        {
+            let mut feed = rmp_serde::from_slice::<model::Feed>(&feed).map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to deserialize the feed",
+                )
+            })?;
+
+            debug!("deserialized feed for {}: {:?}", &account_id, feed);
+
+            if (SystemTime::UNIX_EPOCH + Duration::from_secs(feed.refreshed))
+                .elapsed()
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
+                .as_secs()
+                    > algorithm_configuration.feed_refresh_period {
+                trace!("generating new feed for {}", &account_id);
+
+                trace!("locking the account's tags");
+
+                let _tag_lock = lock_map.lock(&account_id).ok_or((
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "a lock is currently held on your account's tag information. try again in a few seconds",
+                ))?;
+
+                feed = model::Feed {
+                    links: feed::generate_feed(&algorithm_configuration, sqlite.acquire().await.map_err(|_| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "unable to acquire a db connection",
+                        )
+                    })?, &account_id).await?,
+                    refreshed: SystemTime::UNIX_EPOCH
+                        .elapsed()
+                        .map_err(|_| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "unable to calculate the amount of time that has passed since the unix epoch",
+                            )
+                        })?
+                        .as_secs(),
+                };
+
+                debug!("new feed for {}: {:?}", &account_id, feed);
+
+                let serialized_feed = rmp_serde::to_vec(&feed)
+                    .map_err(|_| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "unable to serialize the new feed",
+                        )
+                    })?;
+
+                sqlx::query!(
+                    r"UPDATE accounts SET feed = ? WHERE account_id = ?",
+                    serialized_feed,
+                    account_id
+                )
+                .execute(&mut *connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to update the feed",
+                    )
+                })?;
+            }
+
+            let mut links = Vec::with_capacity(feed.links.len());
+            for (link_id, _) in feed.links {
+                let description = sqlx::query!(
+                    r#"SELECT description as "description!" FROM links WHERE link_id = ?"#,
+                    link_id,
+                )
+                .fetch_one(&mut *connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to query for a link's information",
+                    )
+                })?
+                .description;
+
+                links.push(
+                    rss::ItemBuilder::default()
+                        .title(description)
+                        .description(
+                            templates::FeedItem {
+                                flock_host: http_configuration.host.clone(),
+                                link_id: link_id.clone(),
+                            }
+                            .render()
+                            .map_err(|_| {
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "unable to render an rss feed item's description",
+                                )
+                            })?,
+                        )
+                        .link(format!(
+                            "{}/links/{}",
+                            http_configuration.host.clone(),
+                            link_id.clone()
+                        ))
+                        .guid(
+                            rss::GuidBuilder::default()
+                                .value(link_id)
+                                .permalink(false)
+                                .build(),
+                        )
+                        .build(),
+                );
+            }
+
+            trace!("sending response to {}", &account_id);
+
+            Ok((
+                [("Content-Type", "application/rss+xml")],
+                rss::ChannelBuilder::default()
+                    .title("flock")
+                    .description(format!("the flock feed for account {}", account_id))
+                    .link(http_configuration.host)
+                    .docs("https://www.rssboard.org/rss-specification".to_string())
+                    .items(links)
+                    .build()
+                    .to_string(),
+            ))
+        } else {
+            Err((
+                StatusCode::BAD_REQUEST,
+                "the requested account does not exist",
+            ))
+        }
+    } else {
+        trace!("an attempt was made to access an rss feed without an account");
+
+        Err((
+            StatusCode::BAD_REQUEST,
+            "in order to use the rss feed, you must provide an account id",
+        ))
+    }
 }

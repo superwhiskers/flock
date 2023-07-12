@@ -2,6 +2,14 @@
 
 {% block title %}index{% endblock %}
 
+{% block head %}
+  {% match account %}
+    {% when Some with (account) %}
+      <link rel="alternate" type="application/rss+xml" href="/feed.xml?account_id={{ account.id }}" />
+    {% else %}
+  {% endmatch %}
+{% endblock %}
+
 {% block body %}
   <h1>flock</h1>
 

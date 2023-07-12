@@ -35,7 +35,7 @@ pub struct PcgThreadRng {
 }
 
 pub fn pcg_thread_rng() -> PcgThreadRng {
-    let rng = PCG_RAND_KEY.with(|t| t.clone());
+    let rng = PCG_RAND_KEY.with(|t| Rc::clone(t));
     PcgThreadRng { rng }
 }
 

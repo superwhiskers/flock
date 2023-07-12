@@ -92,6 +92,12 @@ pub struct Http {
     /// The address to listen on
     #[serde(default = "default_address")]
     pub address: SocketAddr,
+
+    /// The host flock is hosted on (for use in RSS feeds)
+    //TODO(superwhiskers): it may be better to use a proper type for this but the Authority
+    //                     type that is part of the http library doesn't support serde
+    #[serde(default = "default_host")]
+    pub host: String,
 }
 
 impl Default for Http {
@@ -99,6 +105,7 @@ impl Default for Http {
         Self {
             tls: None,
             address: default_address(),
+            host: default_host(),
         }
     }
 }
@@ -106,7 +113,12 @@ impl Default for Http {
 /// The default value for the `address` field in the [`Http`] configuration section
 #[inline(always)]
 fn default_address() -> SocketAddr {
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080))
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 7777))
+}
+
+#[inline(always)]
+fn default_host() -> String {
+    "http://localhost:7777".to_string()
 }
 
 /// The structure representing the `http.tls` section of the configuration

@@ -54,17 +54,21 @@ pub struct ScaledRatingData {
 impl ScaledRatingData {
     pub fn prune_nan(self) -> Self {
         Self {
-            rating: self.rating.is_nan().then_some(0.0).unwrap_or(self.rating),
-            deviation: self
-                .deviation
-                .is_nan()
-                .then_some(0.0)
-                .unwrap_or(self.deviation),
-            volatility: self
-                .volatility
-                .is_nan()
-                .then_some(0.0)
-                .unwrap_or(self.volatility),
+            rating: if self.rating.is_nan() {
+                0.0
+            } else {
+                self.rating
+            },
+            deviation: if self.deviation.is_nan() {
+                0.0
+            } else {
+                self.deviation
+            },
+            volatility: if self.volatility.is_nan() {
+                0.0
+            } else {
+                self.volatility
+            },
         }
     }
 

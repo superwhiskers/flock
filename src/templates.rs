@@ -39,7 +39,9 @@ pub struct Link {
 
 #[derive(Template)]
 #[template(path = "login.html")]
-pub struct Login;
+pub struct Login {
+    pub redirect_to: Option<String>,
+}
 
 #[derive(Template)]
 #[template(path = "signup.html")]
@@ -86,4 +88,17 @@ pub struct ProfileInformation {
     // these are a string because they're going to be inserted within a textbox
     //TODO(superwhiskers): consider better ways of presenting this information
     pub tags: String,
+}
+
+#[derive(Template)]
+#[template(path = "feed-item.html")]
+pub struct FeedItem {
+    pub flock_host: String,
+    pub link_id: String,
+}
+
+mod filters {
+    pub fn urlencoded(s: impl std::fmt::Display) -> ::askama::Result<String> {
+        Ok(urlencoding::encode(&s.to_string()).to_string())
+    }
 }

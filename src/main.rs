@@ -69,7 +69,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     ConnectOptions,
 };
-use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{info, log::LevelFilter, trace, warn};
 use tracing_log::LogTracer;
 use tracing_subscriber::FmtSubscriber;
@@ -115,12 +115,13 @@ async fn main() -> anyhow::Result<()> {
     trace!("initializing the server");
 
     let app = Router::new()
-        .route("/", get(routes::index))
+        .route("/", get(routes::get_index))
         .route("/login", get(routes::get_login).post(routes::post_login))
         .route("/signup", get(routes::get_signup).post(routes::post_signup))
-        .route("/logout", get(routes::logout))
+        .route("/logout", get(routes::get_logout))
         .route("/post", get(routes::get_post).post(routes::post_post))
-        .route("/tags", get(routes::tags))
+        .route("/tags", get(routes::get_tags))
+        .route("/feed.xml", get(routes::get_feed_xml))
         .nest(
             "/profile",
             Router::new()
@@ -139,8 +140,10 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(sqlite.clone()))
         .layer(Extension(config.routes))
         .layer(Extension(config.algorithm))
+        .layer(Extension(config.http.clone()))
         .layer(Extension(lock_map))
-        .layer(SetResponseHeaderLayer::appending(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'sha256-rqswtqxEAArCqXmd0ojRzVzKn4Ybs3qW4/aqLeLAXJ0='")));
+        .layer(SetResponseHeaderLayer::appending(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'sha256-rqswtqxEAArCqXmd0ojRzVzKn4Ybs3qW4/aqLeLAXJ0='")))
+        .layer(TraceLayer::new_for_http());
 
     //TODO(superwhiskers): add https support (this isn't necessary in production, though, as
     //                     we use nginx)

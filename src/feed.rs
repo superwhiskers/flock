@@ -77,8 +77,7 @@ pub async fn generate_feed<'a>(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unable to query candidate links from the db",
                 )
-            })?
-            .into_iter(),
+            })?,
         );
     }
 
@@ -121,7 +120,7 @@ pub async fn generate_feed<'a>(
     };
 
     for (ref tag, ref mut score) in &mut tags {
-        if util::decay_score(&algorithm_configuration, score, 1)? {
+        if util::decay_score(algorithm_configuration, score, 1)? {
             let score = rmp_serde::to_vec(&*score).map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -197,7 +196,7 @@ pub async fn generate_feed<'a>(
         let mut overlap = 0.0; // there will always be overlap.
         for (tag, mut score) in candidate_tags {
             if let Some(percentage) = tag_importance.get(&tag) {
-                if util::decay_score(&algorithm_configuration, &mut score, 12)? {
+                if util::decay_score(algorithm_configuration, &mut score, 12)? {
                     let score = rmp_serde::to_vec(&score).map_err(|_| {
                         (
                             StatusCode::INTERNAL_SERVER_ERROR,
