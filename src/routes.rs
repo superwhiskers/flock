@@ -60,6 +60,19 @@ static TAG_DELIMITER_REGEX: LazyLock<Regex> =
 static TAG_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\A[[:alnum:]\-]+\z").expect("unable to compile a regex"));
 
+/// Shorthand for checking if the feature gate is enabled
+macro_rules! coz_progress {
+    () => {{
+        #[cfg(feature = "coz")]
+        ::coz::progress!();
+    }};
+
+    ($name:expr) => {{
+        #[cfg(feature = "coz")]
+        ::coz::progress!($name);
+    }};
+}
+
 pub fn string_to_tags(tags: &mut str) -> Result<HashSet<&'_ str>, (StatusCode, &'static str)> {
     tags.make_ascii_lowercase();
 
@@ -79,6 +92,8 @@ pub async fn get_index(
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("index requested, cookies: {:?}", cookies);
+
+    coz_progress!();
 
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
@@ -230,6 +245,8 @@ pub async fn get_login(
     Query(model::Login { redirect_to }): Query<model::Login>,
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
+    coz_progress!();
+
     if let Some(cookies) = cookies
         && cookies.get("flock.id").is_some() {
         if let Some(url) = redirect_to {
@@ -254,6 +271,8 @@ pub async fn post_login(
     Form(model::PostLogin { account_id }): Form<model::PostLogin>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("login post-ed with account id {}", account_id);
+
+    coz_progress!();
 
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
@@ -306,6 +325,8 @@ pub async fn post_login(
 }
 
 pub async fn get_signup() -> impl IntoResponse {
+    coz_progress!();
+
     (
         [("Content-Type", "application/xhtml+xml")],
         templates::Signup,
@@ -318,6 +339,8 @@ pub async fn post_signup(
     Form(model::PostSignup { mut tags }): Form<model::PostSignup>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("signup post-ed, tags: \"{}\"", tags);
+
+    coz_progress!();
 
     let tags = string_to_tags(&mut tags)?;
 
@@ -444,6 +467,8 @@ pub async fn get_logout(
 ) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
     trace!("logout requested, cookies: {:?}", cookies);
 
+    coz_progress!();
+
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
         (
@@ -478,6 +503,8 @@ pub async fn get_logout(
 pub async fn get_tags(
     Extension(sqlite): Extension<SqlitePool>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    coz_progress!();
+
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -502,6 +529,8 @@ pub async fn get_tags(
 }
 
 pub async fn get_post() -> impl IntoResponse {
+    coz_progress!();
+
     ([("Content-Type", "application/xhtml+xml")], templates::Post)
 }
 
@@ -514,6 +543,8 @@ pub async fn post_post(
     }): Form<model::PostPost>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("post post-ed, tags: \"{}\"", tags);
+
+    coz_progress!();
 
     let tags = string_to_tags(&mut tags)?;
 
@@ -617,6 +648,8 @@ pub async fn link(
         link_id
     );
 
+    coz_progress!();
+
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -676,6 +709,8 @@ pub async fn get_edit_link(
     Extension(sqlite): Extension<SqlitePool>,
     Path(link_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    coz_progress!();
+
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -724,6 +759,8 @@ pub async fn post_edit_link(
         mut tags,
     }): Form<model::PostEditLink>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    coz_progress!();
+
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -911,6 +948,8 @@ pub async fn rate_link(
     base_outcome: f64,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("link rated: {}, cookies: {:?}", link_id, cookies);
+
+    coz_progress!();
 
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
@@ -1152,6 +1191,8 @@ pub async fn get_profile_tags(
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("profile tag information requested, cookies: {:?}", cookies);
 
+    coz_progress!();
+
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
         debug!("account {} requesting profile tag information", account_id);
@@ -1231,6 +1272,8 @@ pub async fn get_profile(
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("profile requested for account, cookies: {:?}", cookies);
 
+    coz_progress!();
+
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
         debug!("account {} requesting profile information", account_id);
@@ -1287,6 +1330,8 @@ pub async fn post_profile(
         refresh_account_id,
         cookies
     );
+
+    coz_progress!();
 
     if let Some(cookies) = cookies
         && let Some(account_id) = cookies.get("flock.id") {
@@ -1429,6 +1474,8 @@ pub async fn get_feed_xml(
     Query(model::FeedXml { account_id }): Query<model::FeedXml>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("feed.xml requested, account id: {}", &account_id);
+
+    coz_progress!();
 
     //TODO(superwhiskers): factor out this and the body of the get_index function into a
     //                     separate function or something

@@ -19,6 +19,11 @@ strip = "symbols"
 panic = "abort"
 lto = "fat"
 
+[profile.release-profile]
+inherits = "release-lto"
+strip = "none"
+debug = true
+
 [dependencies]
 tracing-log = "0.1"
 anyhow = "1"
@@ -75,3 +80,11 @@ features = ["parking_lot", "env-filter"]
 [dependencies.sqlx]
 version = "0.7"
 features = ["runtime-tokio-rustls", "sqlite"]
+
+[dependencies.coz]
+version = "0.1"
+optional = true
+
+[dependencies.dhat]
+version = "0.3"
+optional = true

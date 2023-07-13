@@ -76,8 +76,15 @@ use tracing_subscriber::FmtSubscriber;
 
 use crate::{configuration::Configuration, locks::LockMap};
 
+#[cfg(feature = "dhat")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    #[cfg(feature = "dhat")]
+    let _dhat_profiler = dhat::Profiler::new_heap();
+
     let config = Configuration::new().context("failed to load the configuration")?;
 
     tracing::subscriber::set_global_default(
@@ -126,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
             "/profile",
             Router::new()
                 .route("/", get(routes::get_profile).post(routes::post_profile))
-                .route("/tags", get(routes::get_profile_tags))
+                .route("/tags", get(routes::get_profile_tags)),
         )
         .nest(
             "/links/:link_id",
@@ -134,15 +141,19 @@ async fn main() -> anyhow::Result<()> {
                 .route("/", get(routes::link))
                 .route("/promote", get(routes::get_promote_link))
                 .route("/neutral", get(routes::get_neutral_link))
-                .route("/demote", get(routes::get_demote_link))
-                // .route("/edit", get(routes::get_edit_link).post(routes::post_edit_link)),
+                .route("/demote", get(routes::get_demote_link)), // .route("/edit", get(routes::get_edit_link).post(routes::post_edit_link)),
         )
         .layer(Extension(sqlite.clone()))
         .layer(Extension(config.routes))
         .layer(Extension(config.algorithm))
         .layer(Extension(config.http.clone()))
         .layer(Extension(lock_map))
-        .layer(SetResponseHeaderLayer::appending(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'sha256-rqswtqxEAArCqXmd0ojRzVzKn4Ybs3qW4/aqLeLAXJ0='")))
+        .layer(SetResponseHeaderLayer::appending(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'none'; style-src-elem 'self'; font-src data:; img-src data: 'self'",
+            ),
+        ))
         .layer(TraceLayer::new_for_http());
 
     //TODO(superwhiskers): add https support (this isn't necessary in production, though, as
