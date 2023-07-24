@@ -18,6 +18,7 @@
 
 use instant_glicko_2::{algorithm::ScaledPlayerResult, ScaledRating};
 use serde::{de, Deserialize, Serialize};
+use sqlx::FromRow;
 
 use crate::util::ScaledRatingData;
 
@@ -42,6 +43,7 @@ pub struct PostProfile {
     )]
     pub refresh_account_id: bool,
     pub tags: String,
+    pub new_style_id: String,
 }
 
 fn default_checkbox() -> bool {
@@ -99,6 +101,27 @@ pub struct Login {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub struct Style {
+    pub style: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct FeedXml {
     pub account_id: String,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Tags {
+    pub after: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+pub struct TagRow {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StyleId(pub Option<String>);

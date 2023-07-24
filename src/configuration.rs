@@ -21,6 +21,7 @@ use serde::Deserialize;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
+    time::Duration,
 };
 
 /// The main configuration structure
@@ -200,9 +201,9 @@ fn default_secure_cookies() -> bool {
 /// Configuration pertaining to the algorithm
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct Algorithm {
-    /// The refresh period for the feed, in seconds
-    #[serde(default = "default_feed_refresh_period")]
-    pub feed_refresh_period: u64,
+    /// The refresh period for the feed
+    #[serde(default = "default_feed_refresh_period", with = "humantime_serde")]
+    pub feed_refresh_period: Duration,
 
     /// The rating period, in terms of number of ratings made
     #[serde(default = "default_rating_period")]
@@ -220,9 +221,9 @@ impl Default for Algorithm {
 
 /// The default value for the `feed_refresh_period` field in the [`Algorithm`] configuration section
 #[inline(always)]
-fn default_feed_refresh_period() -> u64 {
+fn default_feed_refresh_period() -> Duration {
     // 24 hours
-    60 * 60 * 24
+    Duration::from_secs(60 * 60 * 24)
 }
 
 /// The default value for the `rating_period` field in the [`Algorithm`] configuration section

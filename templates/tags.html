@@ -7,7 +7,13 @@
 
   <ul id="tag-list">
     {% for tag in tags %}
-      <li class="tag-name">{{ tag }}</li>
+      <li><span class="tag-name">{{ tag.name }}</span> (<span class="tag-id">{{ tag.id }}</span>)</li>
     {% endfor %}
   </ul>
+
+  {% match after %}
+    {% when Some with (after) %}
+      <a href="/tags?after={{ after }}">next page</a>
+    {% when None %}
+  {% endmatch %}
 {% endblock %}

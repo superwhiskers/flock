@@ -15,7 +15,7 @@
       pkgs = nixpkgs.legacyPackages."${system}";
     in {
       devShell = pkgs.mkShell {
-        nativeBuildInputs = with pkgs; [rustup cargo-deny cargo-outdated sqlite];
+        nativeBuildInputs = with pkgs; [rustup cargo-deny cargo-outdated sqlite rlwrap];
       };
     });
 }

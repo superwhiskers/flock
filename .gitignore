@@ -1,4 +1,6 @@
 /target
 *.db
+*.db-wal
+*.db-shm
 config.toml
 .direnv/

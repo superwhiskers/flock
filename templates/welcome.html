@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}welcome{% endblock %}
+
+{% block body %}
+  <h1>welcome to flock</h1>
+
+  your user id is <span class="account-id id">{{ account_id }}</span>. save this somewhere, as
+  it is used to log in
+
+  <ul>
+    <li>
+      your feed is a list of ten links refreshed every {{ algorithm_feed_refresh_period }}
+    </li>
+    <li>to get more personalized links, rate links after visiting them</li>
+    <li>
+      posts can be made using the link in the navigation. you do not need to be logged in to
+      make them
+    </li>
+  </ul>
+
+  have fun.
+{% endblock %}

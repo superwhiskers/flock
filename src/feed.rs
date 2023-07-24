@@ -40,7 +40,7 @@ pub async fn generate_feed<'a>(
     let mut candidates: HashSet<String> = HashSet::new();
 
     for tag in sqlx::query_scalar!(
-        r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
+        r#"SELECT tag_id as "tag_id!" FROM scores WHERE id = ?"#,
         account_id
     )
     .fetch_all(&mut *connection)
@@ -64,7 +64,7 @@ pub async fn generate_feed<'a>(
                AND EXISTS (
                             SELECT 1
                               FROM scores
-                             WHERE scores.tag = ?
+                             WHERE scores.tag_id = ?
                                AND scores.id = links.link_id
                           )"#,
                 account_id,
@@ -89,7 +89,7 @@ pub async fn generate_feed<'a>(
     //                     fetch_all and instead use fetch, if possible
     //TODO(superwhiskers): consider parallelizing this
     let mut tags = sqlx::query!(
-        r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+        r#"SELECT tag_id as "tag_id!", score as "score!" FROM scores WHERE id = ?"#,
         account_id
     )
     .fetch_all(&mut *connection)
@@ -103,7 +103,7 @@ pub async fn generate_feed<'a>(
     .into_iter()
     .map(|tag| {
         rmp_serde::from_slice(&tag.score)
-            .map(|score| (tag.tag, score))
+            .map(|score| (tag.tag_id, score))
             .map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -129,7 +129,7 @@ pub async fn generate_feed<'a>(
             })?;
 
             sqlx::query!(
-                r"UPDATE scores SET score = ? WHERE id = ? AND tag = ?",
+                r"UPDATE scores SET score = ? WHERE id = ? AND tag_id = ?",
                 score,
                 account_id,
                 tag
@@ -164,7 +164,7 @@ pub async fn generate_feed<'a>(
         //TODO(superwhiskers): the same note about using fetch over fetch_all applies here
         //                     as well
         let candidate_tags = sqlx::query!(
-            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            r#"SELECT tag_id as "tag_id!", score as "score!" FROM scores WHERE id = ?"#,
             candidate,
         )
         .fetch_all(&mut *connection)
@@ -178,7 +178,7 @@ pub async fn generate_feed<'a>(
         .into_iter()
         .map(|tag| {
             rmp_serde::from_slice(&tag.score)
-                .map(|score| (tag.tag, score))
+                .map(|score| (tag.tag_id, score))
                 .map_err(|_| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -205,7 +205,7 @@ pub async fn generate_feed<'a>(
                     })?;
 
                     sqlx::query!(
-                        r"UPDATE scores SET score = ? WHERE id = ? AND tag = ?",
+                        r"UPDATE scores SET score = ? WHERE id = ? AND tag_id = ?",
                         score,
                         candidate,
                         tag

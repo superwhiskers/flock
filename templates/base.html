@@ -5,6 +5,12 @@
 
     <title>flock :: {% block title %}{% endblock %}</title>
 
+    {% match style_id.0 %}
+      {% when Some with (style_id) %}
+        <link href="/styles/{{ style_id }}" rel="stylesheet" />
+      {% when None %}
+    {% endmatch %}
+
     {% block head %}{% endblock %}
   </head>
   <body>
@@ -15,7 +21,7 @@
 
       <nav id="site-navigation">
         <ul>
-          <li><a href="/">index</a></li>
+          <li><a href="/">home</a></li>
           <li><a href="/post">post</a></li>
           <li><a href="/tags">tags</a></li>
         </ul>

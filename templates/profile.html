@@ -9,13 +9,23 @@
 
   <form method="post" action="/profile">
     <div>
-      <input type="checkbox" id="refresh-account-id" name="refresh-account-id"/>
+      <input type="checkbox" id="refresh-account-id" name="refresh-account-id" />
       <label for="refresh-account-id">refresh your account id (coming soon)</label>
     </div>
 
     <div>
       <label for="tags">tags you care about (comma-delimited):</label>
-      <input type="text" id="tags" name="tags" value="{{ profile.tags }}"/>
+      <input type="text" id="tags" name="tags" value="{{ profile.tags }}" />
+    </div>
+
+    <div>
+      <label for="theme-id">the id of a theme (leave empty to disable):</label>
+      {% match style_id.0 %}
+        {% when Some with (style_id) %}
+          <input type="text" id="new-style-id" name="new-style-id" value="{{ style_id }}" />
+        {% when None %}
+          <input type="text" id="new-style-id" name="new-style-id" value="" />
+      {% endmatch %}
     </div>
 
     <button>submit</button>

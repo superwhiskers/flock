@@ -18,9 +18,12 @@
 
 use askama_axum::Template;
 
+use crate::model;
+
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct Index {
+    pub style_id: model::StyleId,
     pub account: Option<Account>,
 }
 
@@ -40,22 +43,28 @@ pub struct Link {
 #[derive(Template)]
 #[template(path = "login.html")]
 pub struct Login {
+    pub style_id: model::StyleId,
     pub redirect_to: Option<String>,
 }
 
 #[derive(Template)]
 #[template(path = "signup.html")]
-pub struct Signup;
+pub struct Signup {
+    pub style_id: model::StyleId,
+}
 
 #[derive(Template)]
 #[template(path = "tags.html")]
 pub struct Tags {
-    pub tags: Vec<String>,
+    pub style_id: model::StyleId,
+    pub tags: Vec<model::TagRow>,
+    pub after: Option<String>,
 }
 
 #[derive(Template)]
 #[template(path = "tag-scores.html")]
 pub struct TagScores {
+    pub style_id: model::StyleId,
     pub id: String,
     pub tags: Vec<Tag>,
 }
@@ -67,11 +76,14 @@ pub struct Tag {
 
 #[derive(Template)]
 #[template(path = "post.html")]
-pub struct Post;
+pub struct Post {
+    pub style_id: model::StyleId,
+}
 
 #[derive(Template)]
 #[template(path = "edit-link.html")]
 pub struct EditLink {
+    pub style_id: model::StyleId,
     pub id: String,
     pub description: String,
     pub tags: String,
@@ -80,6 +92,7 @@ pub struct EditLink {
 #[derive(Template)]
 #[template(path = "profile.html")]
 pub struct Profile {
+    pub style_id: model::StyleId,
     pub profile: ProfileInformation,
 }
 
@@ -93,8 +106,17 @@ pub struct ProfileInformation {
 #[derive(Template)]
 #[template(path = "feed-item.html")]
 pub struct FeedItem {
+    pub style_id: model::StyleId,
     pub flock_host: String,
     pub link_id: String,
+}
+
+#[derive(Template)]
+#[template(path = "welcome.html")]
+pub struct Welcome {
+    pub style_id: model::StyleId,
+    pub account_id: String,
+    pub algorithm_feed_refresh_period: humantime::Duration,
 }
 
 mod filters {

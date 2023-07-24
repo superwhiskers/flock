@@ -40,6 +40,8 @@ rand = "0.8"
 parking_lot = "0.12"
 urlencoding = "2"
 rss = "2"
+humantime = "2"
+humantime-serde = "1"
 
 [dependencies.axum]
 version = "0.6"

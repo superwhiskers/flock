@@ -62,11 +62,12 @@ use anyhow::Context;
 use axum::{
     extract::Extension,
     http::{header, HeaderValue},
+    middleware,
     routing::get,
     Router,
 };
 use sqlx::{
-    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
     ConnectOptions,
 };
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
@@ -111,8 +112,14 @@ async fn main() -> anyhow::Result<()> {
         .connect_with({
             SqliteConnectOptions::new()
                 .filename(&config.sqlite.path)
-                .create_if_missing(config.sqlite.create_if_missing)
                 .log_statements(LevelFilter::Debug)
+                //TODO(superwhiskers): we don't apply the schema yet
+                //.create_if_missing(config.sqlite.create_if_missing)
+                // performance
+                // (from https://phiresky.github.io/blog/2020/sqlite-performance-tuning/)
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Normal) // safe with a write-ahead-log
+                .optimize_on_close(true, None)
         })
         .await
         .context("unable to open a db connection pool")?;
@@ -128,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/logout", get(routes::get_logout))
         .route("/post", get(routes::get_post).post(routes::post_post))
         .route("/tags", get(routes::get_tags))
-        .route("/feed.xml", get(routes::get_feed_xml))
+        .route("/welcome", get(routes::get_welcome))
         .nest(
             "/profile",
             Router::new()
@@ -143,6 +150,9 @@ async fn main() -> anyhow::Result<()> {
                 .route("/neutral", get(routes::get_neutral_link))
                 .route("/demote", get(routes::get_demote_link)), // .route("/edit", get(routes::get_edit_link).post(routes::post_edit_link)),
         )
+        .layer(middleware::from_fn(util::apply_style_id_extension))
+        .route("/feed.xml", get(routes::get_feed_xml))
+        .route("/styles/:style_id", get(routes::get_style))
         .layer(Extension(sqlite.clone()))
         .layer(Extension(config.routes))
         .layer(Extension(config.algorithm))

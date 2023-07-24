@@ -31,7 +31,7 @@ use axum::{
 use http_body::combinators::UnsyncBoxBody;
 use instant_glicko_2::{algorithm::ScaledPlayerResult, ScaledRating};
 use regex::Regex;
-use sqlx::SqlitePool;
+use sqlx::{pool::PoolConnection, Sqlite, SqlitePool};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -85,7 +85,54 @@ pub fn string_to_tags(tags: &mut str) -> Result<HashSet<&'_ str>, (StatusCode, &
     Ok(tags)
 }
 
+//TODO(superwhiskers): remove when the heuristics are corrected and/or fix
+#[allow(clippy::needless_pass_by_ref_mut)]
+pub async fn retrieve_tags_from_string(
+    connection: &mut PoolConnection<Sqlite>,
+    mut names: String,
+) -> Result<Vec<String>, (StatusCode, &'static str)> {
+    trace!("retrieving tags from \"{}\"", names);
+
+    let names = string_to_tags(&mut names)?;
+    let mut ids = Vec::with_capacity(names.len());
+
+    debug!("parsed tag names as {:?}", names);
+
+    for name in names {
+        let id = Ulid::with_source(&mut pcg_thread_rng()).to_string();
+
+        sqlx::query!(
+            r"INSERT OR IGNORE INTO tags (tag_id, name) VALUES (?, ?)",
+            id,
+            name
+        )
+        .execute(&mut **connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to insert a tag into the db",
+            )
+        })?;
+
+        // it is necessary for this to be after as it ensures if any racy initialization of
+        // a tag happens that the correct tag_id will be retrieved
+        ids.push(
+            sqlx::query_scalar!(
+                r#"SELECT tag_id as "tag_id!" FROM tags WHERE name = ?"#,
+                name
+            )
+            .fetch_one(&mut **connection)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?,
+        );
+    }
+
+    Ok(ids)
+}
+
 pub async fn get_index(
+    Extension(style_id): Extension<model::StyleId>,
     Extension(sqlite): Extension<SqlitePool>,
     Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
     Extension(lock_map): Extension<&'static LockMap>,
@@ -120,8 +167,12 @@ pub async fn get_index(
 
             if (SystemTime::UNIX_EPOCH + Duration::from_secs(feed.refreshed))
                 .elapsed()
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
-                .as_secs()
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to calculate the amount of time that has passed since the last time the feed was refreshed",
+                    )
+                })?
                     > algorithm_configuration.feed_refresh_period {
                 trace!("generating new feed for {}", account_id);
 
@@ -219,6 +270,7 @@ pub async fn get_index(
             Ok((
                 [("Content-Type", "application/xhtml+xml"), ("Cache-Control", "private, no-store")],
                 templates::Index {
+                    style_id,
                     account: Some(templates::Account {
                         id: account_id.to_string(),
                         links,
@@ -236,12 +288,13 @@ pub async fn get_index(
 
         Ok((
             [("Content-Type", "application/xhtml+xml"), ("Cache-Control", "private, no-store")],
-            templates::Index { account: None },
+            templates::Index { style_id, account: None },
         ))
     }
 }
 
 pub async fn get_login(
+    Extension(style_id): Extension<model::StyleId>,
     Query(model::Login { redirect_to }): Query<model::Login>,
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
@@ -258,7 +311,7 @@ pub async fn get_login(
     } else {
         (
             [("Content-Type", "application/xhtml+xml")],
-            templates::Login { redirect_to },
+            templates::Login { style_id, redirect_to },
         )
         .into_response()
     }
@@ -324,27 +377,23 @@ pub async fn post_login(
     }
 }
 
-pub async fn get_signup() -> impl IntoResponse {
+pub async fn get_signup(Extension(style_id): Extension<model::StyleId>) -> impl IntoResponse {
     coz_progress!();
 
     (
         [("Content-Type", "application/xhtml+xml")],
-        templates::Signup,
+        templates::Signup { style_id },
     )
 }
 
 pub async fn post_signup(
     Extension(sqlite): Extension<SqlitePool>,
     Extension(route_configuration): Extension<RouteConfiguration>,
-    Form(model::PostSignup { mut tags }): Form<model::PostSignup>,
+    Form(model::PostSignup { tags }): Form<model::PostSignup>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("signup post-ed, tags: \"{}\"", tags);
 
     coz_progress!();
-
-    let tags = string_to_tags(&mut tags)?;
-
-    debug!("tags parsed as {:?} for account", tags);
 
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
@@ -353,34 +402,11 @@ pub async fn post_signup(
         )
     })?;
 
-    for tag in &tags {
-        sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-            .execute(&mut *connection)
-            .await
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "unable to insert a tag into the db",
-                )
-            })?;
-    }
-
     let account_id = Ulid::with_source(&mut pcg_thread_rng()).to_string();
 
     debug!("account id generated: {}", account_id);
 
-    let feed = rmp_serde::to_vec(&model::Feed {
-        refreshed: 0,
-        links: Default::default(),
-    })
-    .map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "unable to convert data to messagepack",
-        )
-    })?;
-
-    for tag in tags {
+    for tag in retrieve_tags_from_string(&mut connection, tags).await? {
         let score = ScaledRating::new(
             0.0,
             350.0 / instant_glicko_2::constants::RATING_SCALING_RATIO,
@@ -409,7 +435,7 @@ pub async fn post_signup(
         })?;
 
         sqlx::query!(
-            r"INSERT INTO scores (id, tag, score) VALUES (?, ?, ?)",
+            r"INSERT INTO scores (id, tag_id, score) VALUES (?, ?, ?)",
             account_id,
             tag,
             score,
@@ -424,8 +450,19 @@ pub async fn post_signup(
         })?;
     }
 
+    let feed = rmp_serde::to_vec(&model::Feed {
+        refreshed: 0,
+        links: Default::default(),
+    })
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "unable to convert data to messagepack",
+        )
+    })?;
+
     sqlx::query!(
-        r"INSERT INTO accounts (account_id, feed) VALUES (?, ?)",
+        r"INSERT INTO accounts (account_id, feed, style_id) VALUES (?, ?, null)",
         account_id,
         feed
     )
@@ -457,7 +494,7 @@ pub async fn post_signup(
                 )
             },
         )]),
-        Redirect::to("/"),
+        Redirect::to("/welcome"),
     ))
 }
 
@@ -501,7 +538,9 @@ pub async fn get_logout(
 }
 
 pub async fn get_tags(
+    Extension(style_id): Extension<model::StyleId>,
     Extension(sqlite): Extension<SqlitePool>,
+    Query(model::Tags { after }): Query<model::Tags>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     coz_progress!();
 
@@ -512,7 +551,12 @@ pub async fn get_tags(
         )
     })?;
 
-    let tags = sqlx::query_scalar!(r#"SELECT tag as "tag!" FROM tags"#)
+    let tags = if let Some(after) = after {
+        sqlx::query_as!(
+            model::TagRow,
+            r#"SELECT name as "name!", tag_id as "id!" FROM tags WHERE tag_id > ? ORDER BY tag_id LIMIT 100"#,
+            after
+        )
         .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
@@ -520,18 +564,43 @@ pub async fn get_tags(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "unable to query the tags",
             )
-        })?;
+        })?
+    } else {
+        sqlx::query_as!(
+            model::TagRow,
+            r#"SELECT name as "name!", tag_id as "id!" FROM tags ORDER BY tag_id LIMIT 100"#
+        )
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query the tags",
+            )
+        })?
+    };
 
     Ok((
         [("Content-Type", "application/xhtml+xml")],
-        templates::Tags { tags },
+        templates::Tags {
+            style_id,
+            after: if tags.len() == 100 {
+                tags.last().map(|t| t.id.clone())
+            } else {
+                None
+            },
+            tags,
+        },
     ))
 }
 
-pub async fn get_post() -> impl IntoResponse {
+pub async fn get_post(Extension(style_id): Extension<model::StyleId>) -> impl IntoResponse {
     coz_progress!();
 
-    ([("Content-Type", "application/xhtml+xml")], templates::Post)
+    (
+        [("Content-Type", "application/xhtml+xml")],
+        templates::Post { style_id },
+    )
 }
 
 pub async fn post_post(
@@ -539,16 +608,12 @@ pub async fn post_post(
     Form(model::PostPost {
         link,
         description,
-        mut tags,
+        tags,
     }): Form<model::PostPost>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     trace!("post post-ed, tags: \"{}\"", tags);
 
     coz_progress!();
-
-    let tags = string_to_tags(&mut tags)?;
-
-    debug!("tags parsed as {:?} for post", tags);
 
     let mut connection = sqlite.acquire().await.map_err(|_| {
         (
@@ -557,25 +622,13 @@ pub async fn post_post(
         )
     })?;
 
-    for tag in &tags {
-        sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-            .execute(&mut *connection)
-            .await
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "unable to insert a tag into the db",
-                )
-            })?;
-    }
-
     let link_id = Ulid::with_source(&mut pcg_thread_rng()).to_string();
 
     debug!("link id generated: {}", link_id);
 
     //TODO(superwhiskers): this and the similar loop used in account creation (and likely
     //                     account tag modification) could be factored out
-    for tag in tags {
+    for tag in retrieve_tags_from_string(&mut connection, tags).await? {
         let score = ScaledRating::new(
             0.0,
             350.0 / instant_glicko_2::constants::RATING_SCALING_RATIO,
@@ -604,7 +657,7 @@ pub async fn post_post(
         })?;
 
         sqlx::query!(
-            r"INSERT INTO scores (id, tag, score) VALUES (?, ?, ?)",
+            r"INSERT INTO scores (id, tag_id, score) VALUES (?, ?, ?)",
             link_id,
             tag,
             score,
@@ -706,6 +759,7 @@ pub async fn link(
 
 //TODO(superwhiskers): require for a link to have been viewed (and potentially rated) before allowing one to edit it
 pub async fn get_edit_link(
+    Extension(style_id): Extension<model::StyleId>,
     Extension(sqlite): Extension<SqlitePool>,
     Path(link_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
@@ -732,7 +786,7 @@ pub async fn get_edit_link(
     })?
     .ok_or((StatusCode::BAD_REQUEST, "the requested link does not exist"))?;
 
-    let tags = sqlx::query_scalar!(r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#, link_id)
+    let tags = sqlx::query_scalar!(r#"SELECT tags.name as "name!" FROM scores INNER JOIN tags ON scores.tag_id = tags.tag_id WHERE scores.id = ?"#, link_id)
         .fetch_all(&mut *connection)
         .await
         .map_err(|_| {
@@ -743,6 +797,7 @@ pub async fn get_edit_link(
         })?;
 
     Ok(templates::EditLink {
+        style_id,
         id: link_id,
         description,
         tags: tags.join(","),
@@ -754,10 +809,7 @@ pub async fn get_edit_link(
 pub async fn post_edit_link(
     Extension(sqlite): Extension<SqlitePool>,
     Path(link_id): Path<String>,
-    Form(model::PostEditLink {
-        description,
-        mut tags,
-    }): Form<model::PostEditLink>,
+    Form(model::PostEditLink { description, tags }): Form<model::PostEditLink>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     coz_progress!();
 
@@ -778,34 +830,28 @@ pub async fn post_edit_link(
     .count
         == 1
     {
-        let tags = string_to_tags(&mut tags)?;
-        let old_tags_owned =
-            sqlx::query_scalar!(r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#, link_id)
-                .fetch_all(&mut *connection)
-                .await
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "unable to query the old tags",
-                    )
-                })?;
-        let old_tags = old_tags_owned
+        let tags_owned = retrieve_tags_from_string(&mut connection, tags).await?;
+        let tags = tags_owned
             .iter()
             .map(|t| t.as_str())
             .collect::<HashSet<_>>();
 
-        //TODO(superwhiskers): this needs to be made into a function
-        for tag in &tags {
-            sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-                .execute(&mut *connection)
-                .await
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "unable to insert a tag into the db",
-                    )
-                })?;
-        }
+        let old_tags_owned = sqlx::query_scalar!(
+            r#"SELECT tag_id as "tag_id!" FROM scores WHERE id = ?"#,
+            link_id
+        )
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to query the old tags",
+            )
+        })?;
+        let old_tags = old_tags_owned
+            .iter()
+            .map(|t| t.as_str())
+            .collect::<HashSet<_>>();
 
         sqlx::query!(
             r"UPDATE links SET description = ? WHERE link_id = ?",
@@ -822,15 +868,19 @@ pub async fn post_edit_link(
         })?;
 
         for tag in &old_tags - &tags {
-            sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag = ?", link_id, tag)
-                .execute(&mut *connection)
-                .await
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "unable to remove an old tag from the db",
-                    )
-                })?;
+            sqlx::query!(
+                r"DELETE FROM scores WHERE id = ? AND tag_id = ?",
+                link_id,
+                tag
+            )
+            .execute(&mut *connection)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to remove an old tag from the db",
+                )
+            })?;
         }
 
         for tag in &tags - &old_tags {
@@ -862,7 +912,7 @@ pub async fn post_edit_link(
             })?;
 
             sqlx::query!(
-                r"INSERT INTO scores (id, tag, score) VALUES (?, ?, ?)",
+                r"INSERT INTO scores (id, tag_id, score) VALUES (?, ?, ?)",
                 link_id,
                 tag,
                 score,
@@ -1015,7 +1065,7 @@ pub async fn rate_link(
         //TODO(superwhiskers): same thing mentioned in src/feed.rs, but we should
         //                     additionally consider making this a function at this point
         let user_scores = sqlx::query!(
-            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            r#"SELECT tag_id as "tag_id!", score as "score!" FROM scores WHERE id = ?"#,
             account_id
         )
         .fetch_all(&mut *connection)
@@ -1029,7 +1079,7 @@ pub async fn rate_link(
         .into_iter()
         .map(|tag| {
             rmp_serde::from_slice(&tag.score)
-                .map(|score| (tag.tag, score))
+                .map(|score| (tag.tag_id, score))
                 .map_err(|_| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1040,7 +1090,7 @@ pub async fn rate_link(
         .collect::<Result<HashMap<String, model::Score>, _>>()?;
 
         let link_scores = sqlx::query!(
-            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            r#"SELECT tag_id as "tag_id!", score as "score!" FROM scores WHERE id = ?"#,
             link_id
         )
         .fetch_all(&mut *connection)
@@ -1054,7 +1104,7 @@ pub async fn rate_link(
         .into_iter()
         .map(|tag| {
             rmp_serde::from_slice(&tag.score)
-                .map(|score| (tag.tag, score))
+                .map(|score| (tag.tag_id, score))
                 .map_err(|_| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1129,7 +1179,7 @@ pub async fn rate_link(
             })?;
 
             sqlx::query!(
-                "UPDATE scores SET score = ? WHERE id = ? AND tag = ?",
+                "UPDATE scores SET score = ? WHERE id = ? AND tag_id = ?",
                 user_score_bin,
                 account_id,
                 tag
@@ -1151,7 +1201,7 @@ pub async fn rate_link(
             })?;
 
             sqlx::query!(
-                "UPDATE scores SET score = ? WHERE id = ? AND tag = ?",
+                "UPDATE scores SET score = ? WHERE id = ? AND tag_id = ?",
                 link_score_bin,
                 link_id,
                 tag
@@ -1186,6 +1236,7 @@ pub async fn rate_link(
 }
 
 pub async fn get_profile_tags(
+    Extension(style_id): Extension<model::StyleId>,
     Extension(sqlite): Extension<SqlitePool>,
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
@@ -1224,7 +1275,7 @@ pub async fn get_profile_tags(
         }
 
         let tags = sqlx::query!(
-            r#"SELECT tag as "tag!", score as "score!" FROM scores WHERE id = ?"#,
+            r#"SELECT tags.name as "name!", scores.score as "score!" FROM scores INNER JOIN tags ON scores.tag_id = tags.tag_id WHERE scores.id = ?"#,
             account_id
         )
         .fetch_all(&mut *connection)
@@ -1247,7 +1298,7 @@ pub async fn get_profile_tags(
                 })
                 .map(|score| {
                     templates::Tag {
-                        name: tag.tag,
+                        name: tag.name,
                         score,
                     }
                 })
@@ -1256,6 +1307,7 @@ pub async fn get_profile_tags(
         return Ok((
             [("Content-Type", "application/xhtml+xml")],
             templates::TagScores {
+                style_id,
                 id: account_id.to_string(),
                 tags,
             }
@@ -1265,8 +1317,9 @@ pub async fn get_profile_tags(
     Err((StatusCode::BAD_REQUEST, "you are not logged in"))
 }
 
-//TODO(superwhiskers): finish implementing the profile changes. we may need a lock table or something to deal with race conditions
+//TODO(superwhiskers): decouple account ids from the id used to log in
 pub async fn get_profile(
+    Extension(style_id): Extension<model::StyleId>,
     Extension(sqlite): Extension<SqlitePool>,
     cookies: Option<TypedHeader<Cookie>>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
@@ -1285,8 +1338,8 @@ pub async fn get_profile(
             )
         })?;
 
-        let tags = sqlx::query!(
-            r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
+        let tags = sqlx::query_scalar!(
+            r#"SELECT tags.name as "name!" FROM scores INNER JOIN tags ON scores.tag_id = tags.tag_id WHERE scores.id = ?"#,
             account_id
         )
         .fetch_all(&mut *connection)
@@ -1301,9 +1354,10 @@ pub async fn get_profile(
         Ok((
             [("Content-Type", "application/xhtml+xml")],
             templates::Profile {
+                style_id,
                 profile: templates::ProfileInformation {
                     id: account_id.to_string(),
-                    tags: tags.iter().map(|tag| tag.tag.as_str()).intersperse(",").collect::<String>(),
+                    tags: tags.iter().map(|tag| tag.as_str()).intersperse(",").collect::<String>(),
                 },
             }
         ))
@@ -1316,12 +1370,14 @@ pub async fn get_profile(
 }
 
 pub async fn post_profile(
+    Extension(style_id): Extension<model::StyleId>,
     Extension(sqlite): Extension<SqlitePool>,
     Extension(lock_map): Extension<&'static LockMap>,
     cookies: Option<TypedHeader<Cookie>>,
     Form(model::PostProfile {
         refresh_account_id,
-        mut tags,
+        tags,
+        new_style_id,
     }): Form<model::PostProfile>,
 ) -> impl IntoResponse {
     trace!(
@@ -1350,7 +1406,7 @@ pub async fn post_profile(
         })?;
 
         if sqlx::query_scalar!(
-            r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
+            "SELECT 1 FROM accounts WHERE account_id = ?",
             account_id
         )
         .fetch_optional(&mut *connection)
@@ -1368,7 +1424,59 @@ pub async fn post_profile(
             ));
         }
 
-        let tags = string_to_tags(&mut tags)?;
+        if new_style_id != style_id.0.as_deref().unwrap_or("") {
+            if new_style_id.is_empty() {
+                sqlx::query!(
+                    "UPDATE accounts SET style_id = null WHERE account_id = ?",
+                    account_id
+                )
+                .execute(&mut *connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to update an account",
+                    )
+                })?;
+            } else if sqlx::query_scalar!(
+                "SELECT 1 FROM styles WHERE style_id = ?",
+                new_style_id
+            )
+            .fetch_optional(&mut *connection)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unable to check if a style exists",
+                )
+            })?
+            .is_some() {
+                sqlx::query!(
+                    "UPDATE accounts SET style_id = ? WHERE account_id = ?",
+                    new_style_id,
+                    account_id
+                )
+                .execute(&mut *connection)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to update an account",
+                    )
+                })?;
+            } else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "invalid style id",
+                ));
+            }
+        }
+
+        let tags_owned = retrieve_tags_from_string(&mut connection, tags).await?;
+        let tags = tags_owned
+            .iter()
+            .map(|t| t.as_str())
+            .collect::<HashSet<_>>();
 
         let _tag_lock = lock_map.lock(account_id).ok_or((
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1376,7 +1484,7 @@ pub async fn post_profile(
         ))?;
 
         let old_tags_owned = sqlx::query_scalar!(
-            r#"SELECT tag as "tag!" FROM scores WHERE id = ?"#,
+            r#"SELECT tag_id as "tag_id!" FROM scores WHERE id = ?"#,
             account_id
         )
         .fetch_all(&mut *connection)
@@ -1392,22 +1500,8 @@ pub async fn post_profile(
             .map(|t| t.as_str())
             .collect::<HashSet<_>>();
 
-        //TODO(superwhiskers): this and the following pieces can be factored into a function
-        //                     as noted in the function that handles post editing
-        for tag in &tags {
-            sqlx::query!(r"INSERT OR IGNORE INTO tags (tag) VALUES (?)", tag)
-                .execute(&mut *connection)
-                .await
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "unable to insert a tag into the db",
-                    )
-                })?;
-        }
-
         for tag in &old_tags - &tags {
-            sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag = ?", account_id, tag)
+            sqlx::query!(r"DELETE FROM scores WHERE id = ? AND tag_id = ?", account_id, tag)
                 .execute(&mut *connection)
                 .await
                 .map_err(|_| {
@@ -1447,7 +1541,7 @@ pub async fn post_profile(
             })?;
 
             sqlx::query!(
-                r"INSERT INtO scores (id, tag, score) VALUES (?, ?, ?)",
+                r"INSERT INTO scores (id, tag_id, score) VALUES (?, ?, ?)",
                 account_id,
                 tag,
                 score
@@ -1489,15 +1583,15 @@ pub async fn get_feed_xml(
             )
         })?;
 
-        if let Some(feed) = sqlx::query_scalar!(
-            r#"SELECT feed as "feed!" FROM accounts WHERE account_id = ?"#,
+        if let Some(account) = sqlx::query!(
+            r#"SELECT feed as "feed!", style_id as "style_id?" FROM accounts WHERE account_id = ?"#,
             account_id
         )
         .fetch_optional(&mut *connection)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))?
         {
-            let mut feed = rmp_serde::from_slice::<model::Feed>(&feed).map_err(|_| {
+            let mut feed = rmp_serde::from_slice::<model::Feed>(&account.feed).map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unable to deserialize the feed",
@@ -1508,8 +1602,12 @@ pub async fn get_feed_xml(
 
             if (SystemTime::UNIX_EPOCH + Duration::from_secs(feed.refreshed))
                 .elapsed()
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to calculate the amount of time that has passed since the last time the feed was refreshed"))?
-                .as_secs()
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "unable to calculate the amount of time that has passed since the last time the feed was refreshed",
+                    )
+                })?
                     > algorithm_configuration.feed_refresh_period {
                 trace!("generating new feed for {}", &account_id);
 
@@ -1584,6 +1682,7 @@ pub async fn get_feed_xml(
                         .title(description)
                         .description(
                             templates::FeedItem {
+                                style_id: model::StyleId(account.style_id.clone()),
                                 flock_host: http_configuration.host.clone(),
                                 link_id: link_id.clone(),
                             }
@@ -1635,6 +1734,68 @@ pub async fn get_feed_xml(
         Err((
             StatusCode::BAD_REQUEST,
             "in order to use the rss feed, you must provide an account id",
+        ))
+    }
+}
+
+pub async fn get_style(
+    Extension(sqlite): Extension<SqlitePool>,
+    Path(style_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("style requested, style id: {}", &style_id);
+
+    coz_progress!();
+
+    let mut connection = sqlite.acquire().await.map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "unable to acquire a db connection",
+        )
+    })?;
+
+    let style = sqlx::query_scalar!(
+        r#"SELECT style as "style!" FROM styles WHERE style_id = ?"#,
+        style_id
+    )
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "unable to query the db for the style",
+        )
+    })?
+    .ok_or((
+        StatusCode::BAD_REQUEST,
+        "the requested style does not exist",
+    ))?;
+
+    Ok(([("Content-Type", "text/css")], style))
+}
+
+pub async fn get_welcome(
+    Extension(style_id): Extension<model::StyleId>,
+    Extension(algorithm_configuration): Extension<AlgorithmConfiguration>,
+    cookies: Option<TypedHeader<Cookie>>,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("welcome requested, cookies: {:?}", cookies);
+
+    coz_progress!();
+
+    if let Some(cookies) = cookies
+        && let Some(account_id) = cookies.get("flock.id") {
+        Ok((
+            [("Content-Type", "application/xhtml+xml")],
+            templates::Welcome {
+                style_id,
+                account_id: account_id.to_string(),
+                algorithm_feed_refresh_period: algorithm_configuration.feed_refresh_period.into(),
+            }
+        ))
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            "you are not logged in",
         ))
     }
 }

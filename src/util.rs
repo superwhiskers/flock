@@ -16,12 +16,20 @@
 //  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 
-use axum::http::StatusCode;
+use axum::{
+    headers::Cookie,
+    http::{Request, StatusCode},
+    middleware::Next,
+    response::Response,
+    Extension, TypedHeader,
+    extract::Query,
+};
 use instant_glicko_2::{
     algorithm as glicko_2, constants as glicko_2_constants, FromWithParameters, Parameters, Rating,
     ScaledRating,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use std::{
     borrow::Borrow,
     cmp::{self, Ordering},
@@ -31,7 +39,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::signal;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{configuration::Algorithm as AlgorithmConfiguration, model};
 
@@ -332,6 +340,47 @@ pub fn decay_score(
     } else {
         false
     })
+}
+
+pub async fn apply_style_id_extension<B>(
+    Extension(sqlite): Extension<SqlitePool>,
+    cookies: Option<TypedHeader<Cookie>>,
+    Query(model::Style { style }): Query<model::Style>,
+    mut request: Request<B>,
+    next: Next<B>,
+) -> Result<Response, (StatusCode, &'static str)> {
+    trace!(
+        "running style id extension middleware, cookies: {:?}",
+        cookies
+    );
+
+    request.extensions_mut().insert(model::StyleId(None));
+
+    if let Some(style) = style {
+        request.extensions_mut().insert(model::StyleId(Some(style)));
+    } else if let Some(cookies) = cookies
+        && let Some(account_id) = cookies.get("flock.id") {
+        debug!("account {} being checked for applied styles", account_id);
+
+        let mut connection = sqlite.acquire().await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to acquire a db connection",
+            )
+        })?;
+
+        if let Some(style_id) = sqlx::query_scalar!(
+            r#"SELECT (SELECT style_id FROM accounts WHERE account_id = ?) AS "style_id?";"#,
+            account_id
+        )
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "unable to query the db"))? {
+            request.extensions_mut().insert(model::StyleId(Some(style_id)));
+        }
+    }
+
+    Ok(next.run(request).await)
 }
 
 #[cfg(unix)]
