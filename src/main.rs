@@ -81,6 +81,10 @@ use crate::{configuration::Configuration, locks::LockMap};
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
+#[cfg(not(feature = "dhat"))]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "dhat")]
@@ -134,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/signup", get(routes::get_signup).post(routes::post_signup))
         .route("/logout", get(routes::get_logout))
         .route("/post", get(routes::get_post).post(routes::post_post))
+        .route("/post-style", get(routes::get_post_style).post(routes::post_post_style))
         .route("/tags", get(routes::get_tags))
         .route("/welcome", get(routes::get_welcome))
         .nest(

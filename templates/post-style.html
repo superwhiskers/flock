@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}post-style{% endblock %}
+
+{% block body %}
+  <h1>post a theme</h1>
+
+  <form method="post" action="/post-style" enctype="multipart/form-data">
+    <div>
+      <label for="stylesheet">
+        upload a <a href="https://developer.mozilla.org/en-US/docs/Web/CSS">css stylesheet</a>.
+        the name will be the file name with the <code>.css</code> extension stripped (if it
+        exists).
+      </label>
+      <input type="file" id="stylesheet" name="stylesheet" accept="text/css" />
+    </div>
+
+    <button>submit</button>
+  </form>
+{% endblock %}

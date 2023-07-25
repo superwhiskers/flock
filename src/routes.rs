@@ -22,7 +22,7 @@
 use askama::Template;
 use axum::{
     body::Bytes,
-    extract::{Form, Path, Query},
+    extract::{Form, Multipart, Path, Query},
     headers::Cookie,
     http::{header::SET_COOKIE, Response, StatusCode},
     response::{AppendHeaders, IntoResponse, Redirect},
@@ -673,7 +673,7 @@ pub async fn post_post(
     }
 
     sqlx::query!(
-        "INSERT INTO LINKS (link_id, link, description) VALUES (?, ?, ?)",
+        "INSERT INTO links (link_id, link, description) VALUES (?, ?, ?)",
         link_id,
         link,
         description
@@ -1791,6 +1791,128 @@ pub async fn get_welcome(
                 account_id: account_id.to_string(),
                 algorithm_feed_refresh_period: algorithm_configuration.feed_refresh_period.into(),
             }
+        ))
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            "you are not logged in",
+        ))
+    }
+}
+
+pub async fn get_post_style(
+    Extension(style_id): Extension<model::StyleId>,
+) -> impl IntoResponse {
+    trace!("post-style requested");
+
+    coz_progress!();
+
+    (
+        [("Content-Type", "application/xhtml+xml")],
+        templates::PostStyle { style_id },
+    )
+}
+
+pub async fn post_post_style(
+    Extension(sqlite): Extension<SqlitePool>,
+    Extension(style_id): Extension<model::StyleId>,
+    cookies: Option<TypedHeader<Cookie>>,
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    trace!("post-style posted, cookies: {:?}", cookies);
+
+    coz_progress!();
+
+    if let Some(cookies) = cookies
+        && let Some(account_id) = cookies.get("flock.id") {
+        let mut connection = sqlite.acquire().await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to acquire a db connection",
+            )
+        })?;
+
+        if sqlx::query_scalar!(
+            r#"SELECT 1 FROM accounts WHERE account_id = ?"#,
+            account_id
+        )
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to check if an account exists",
+            )
+        })?
+        .is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "the requested account does not exist",
+            ));
+        }
+
+        let (name, stylesheet) = loop {
+            if let Some(field) = multipart
+                .next_field()
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        "unable to read multipart form data",
+                    )
+                })? {
+                if field.name() == Some("stylesheet")
+                   && field.content_type() == Some("text/css") {
+                    break (
+                        field
+                            .file_name()
+                            .map(|n| n.trim_end_matches(".css").to_string())
+                            .unwrap_or_else(|| "unnamed".to_string()),
+                        field
+                            .text()
+                            .await
+                            .map_err(|_| {
+                                (
+                                    StatusCode::BAD_REQUEST,
+                                    "unable to read multipart form data",
+                                )
+                            })?
+                    );
+                }
+            } else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "no useful multipart form data was found",
+                ));
+            }
+        };
+
+        let new_style_id = Ulid::with_source(&mut pcg_thread_rng()).to_string();
+
+        debug!("style id generated: {}", new_style_id);
+
+        sqlx::query!(
+            "INSERT INTO styles (style_id, name, creator, style) VALUES (?, ?, ?, ?)",
+            new_style_id,
+            name,
+            account_id,
+            stylesheet
+        )
+        .execute(&mut *connection)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "unable to insert the stylesheet into the db",
+            )
+        })?;
+
+        Ok((
+            [("Content-Type", "application/xhtml+xml")],
+            templates::PostStyleResult {
+                style_id,
+                created_style_id: new_style_id,
+            },
         ))
     } else {
         Err((

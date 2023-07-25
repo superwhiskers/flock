@@ -98,8 +98,6 @@ pub struct Profile {
 
 pub struct ProfileInformation {
     pub id: String,
-    // these are a string because they're going to be inserted within a textbox
-    //TODO(superwhiskers): consider better ways of presenting this information
     pub tags: String,
 }
 
@@ -117,6 +115,19 @@ pub struct Welcome {
     pub style_id: model::StyleId,
     pub account_id: String,
     pub algorithm_feed_refresh_period: humantime::Duration,
+}
+
+#[derive(Template)]
+#[template(path = "post-style.html")]
+pub struct PostStyle {
+    pub style_id: model::StyleId,
+}
+
+#[derive(Template)]
+#[template(path = "post-style-result.html")]
+pub struct PostStyleResult {
+    pub style_id: model::StyleId,
+    pub created_style_id: String,
 }
 
 mod filters {

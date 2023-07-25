@@ -45,7 +45,7 @@ humantime-serde = "1"
 
 [dependencies.axum]
 version = "0.6"
-features = ["http2", "headers"]
+features = ["http2", "headers", "multipart"]
 
 [dependencies.askama]
 version = "0.12"
@@ -90,3 +90,8 @@ optional = true
 [dependencies.dhat]
 version = "0.3"
 optional = true
+
+[dependencies.mimalloc]
+version = "0.1"
+# remove if we become less confident about security
+default-features = false

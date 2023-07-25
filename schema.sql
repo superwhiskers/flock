@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS seen (
 
 CREATE TABLE IF NOT EXISTS styles (
     style_id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
     creator TEXT NOT NULL,
     style TEXT NOT NULL
 );

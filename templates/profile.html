@@ -34,7 +34,8 @@
   <h2>miscellaneous</h2>
 
   <ul>
-    <li>an rss feed is available <a href="/feed.xml?account-id={{ profile.id }}">here</a></li>
+    <li>an rss feed is available <a href="/feed.xml?account-id={{ profile.id|urlencoded }}">here</a></li>
     <li>your tag scores can be found <a href="/profile/tags">here</a></li>
+    <li>you can upload a theme <a href="/post-style">here</a> (you must be logged in)</li>
   </ul>
 {% endblock %}
