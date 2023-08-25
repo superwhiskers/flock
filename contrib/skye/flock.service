@@ -1,0 +1,17 @@
+# example flock service file
+
+[Unit]
+Description=Flock
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=skye
+WorkingDirectory=/home/skye/flock
+ExecStart=/home/skye/flock/target/release/flock
+
+[Install]
+WantedBy=multi-user.target
