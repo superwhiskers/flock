@@ -9,8 +9,12 @@
     <div>
       <label for="stylesheet">
         upload a <a href="https://developer.mozilla.org/en-US/docs/Web/CSS">css stylesheet</a>.
-        the name will be the file name with the <code>.css</code> extension stripped (if it
-        exists).
+        <span class="explanation">the name will be the file name with the <code>.css</code>
+        extension stripped (if it exists). styles may not reference external resources (see
+        the <code>Content-Security-Policy</code> in the response headers of each request if
+        you're curious). embed all of them into the stylesheet as base64 if you want to change
+        the font, embed an image, or do anything that would typically be done by referencing a
+        URL.</span>
       </label>
       <input type="file" id="stylesheet" name="stylesheet" accept="text/css" />
     </div>

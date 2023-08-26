@@ -5,6 +5,12 @@
 {% block body %}
   <h1>tags</h1>
 
+  <span class="explanation">
+    to make a new tag, just add one that doesn't exist when asked to provide one.
+    parentheses in this list delimit the id of a tag, which are provided here for
+    convenience but cannot be used where a tag name is expected.
+  </span>
+
   <ul id="tag-list">
     {% for tag in tags %}
       <li><span class="tag-name">{{ tag.name }}</span> (<span class="tag-id">{{ tag.id }}</span>)</li>
