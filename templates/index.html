@@ -13,55 +13,59 @@
 {% block body %}
   <h1>flock</h1>
 
-  {% match account %}
-    {% when Some with (account) %}
-      <ul id="user-actions">
-        <li><a href="/profile">profile</a></li>
-        <li><a href="/logout">log out</a></li>
-      </ul>
+  <div class="container">
+    {% match account %}
+      {% when Some with (account) %}
+        <ul id="user-actions" class="item">
+          <li><a href="/profile">profile</a></li>
+          <li><a href="/logout">log out</a></li>
+        </ul>
 
-      <h2>your feed</h2>
+        <div id="feed" class="item">
+          <h2>your feed</h2>
 
-      <dl id="feed">
-        {% for link in account.links %}
-          <dt>
-            <a class="link-description" href="/links/{{ link.id }}">{{ link.description }}</a>
-          </dt>
+          <dl>
+            {% for link in account.links %}
+              <dt>
+                <a class="link-description" href="/links/{{ link.id }}">{{ link.description }}</a>
+              </dt>
 
-          {% if !link.rated %}
-            {% if link.visited %}
-              <dd class="link-actions">
-                <ul>
-                  <li>
-                    <a class="link-promote" href="/links/{{ link.id }}/promote">promote</a>
-                  </li>
-                  <li>
-                    <a class="link-neutral" href="/links/{{ link.id }}/neutral">neutral</a>
-                  </li>
-                  <li>
-                    <a class="link-demote" href="/links/{{ link.id }}/demote">demote</a>
-                  </li>
-                  {#
-                    <li>
-                      <a class="link-edit" href="/links/{{ link.id }}/edit">edit</a>
-                    </li>
-                  #}
-                </ul>
-              </dd>
-            {% endif %}
-          {% endif %}
+              {% if !link.rated %}
+                {% if link.visited %}
+                  <dd class="link-actions">
+                    <ul>
+                      <li>
+                        <a class="link-promote" href="/links/{{ link.id }}/promote">promote</a>
+                      </li>
+                      <li>
+                        <a class="link-neutral" href="/links/{{ link.id }}/neutral">neutral</a>
+                      </li>
+                      <li>
+                        <a class="link-demote" href="/links/{{ link.id }}/demote">demote</a>
+                      </li>
+                      {#
+                        <li>
+                          <a class="link-edit" href="/links/{{ link.id }}/edit">edit</a>
+                        </li>
+                      #}
+                    </ul>
+                  </dd>
+                {% endif %}
+              {% endif %}
 
-          {% match link.rating %}
-            {% when Some with (rating) %}
-              <dd class="link-score score">{{ rating }}</dd>
-            {% when None %}
-          {% endmatch %}
-        {% endfor %}
-      </dl>
-    {% when None %}
-      <ul id="user-actions">
-        <li><a href="/login">log in</a></li>
-        <li><a href="/signup">sign up</a></li>
-      </ul>
-  {% endmatch %}
+              {% match link.rating %}
+                {% when Some with (rating) %}
+                  <dd class="link-score score">{{ rating }}</dd>
+                {% when None %}
+              {% endmatch %}
+            {% endfor %}
+          </dl>
+        </div>
+      {% when None %}
+        <ul id="user-actions" class="item">
+          <li><a href="/login">log in</a></li>
+          <li><a href="/signup">sign up</a></li>
+        </ul>
+    {% endmatch %}
+  </div>
 {% endblock %}

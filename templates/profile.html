@@ -5,37 +5,43 @@
 {% block body %}
   <h1>profile for account <span class="account-id id">{{ profile.id }}</span></h1>
 
-  <h2>settings</h2>
+  <div class="container">
+    <div id="settings" class="item">
+      <h2>settings</h2>
 
-  <form method="post" action="/profile">
-    <div>
-      <input type="checkbox" id="refresh-account-id" name="refresh-account-id" />
-      <label for="refresh-account-id">refresh your account id (coming soon)</label>
+      <form method="post" action="/profile">
+        <div>
+          <input type="checkbox" id="refresh-account-id" name="refresh-account-id" />
+          <label for="refresh-account-id">refresh your account id (coming soon)</label>
+        </div>
+
+        <div>
+          <label for="tags">tags you care about (comma-delimited):</label>
+          <input type="text" id="tags" name="tags" value="{{ profile.tags }}" />
+        </div>
+
+        <div>
+          <label for="theme-id">the id of a theme (leave empty to disable):</label>
+          {% match style_id.0 %}
+            {% when Some with (style_id) %}
+              <input type="text" id="new-style-id" name="new-style-id" value="{{ style_id }}" />
+            {% when None %}
+              <input type="text" id="new-style-id" name="new-style-id" value="" />
+          {% endmatch %}
+        </div>
+
+        <button>submit</button>
+      </form>
     </div>
 
-    <div>
-      <label for="tags">tags you care about (comma-delimited):</label>
-      <input type="text" id="tags" name="tags" value="{{ profile.tags }}" />
+    <div id="miscellaneous" class="item">
+      <h2>miscellaneous</h2>
+
+      <ul>
+        <li>an rss feed is available <a href="/feed.xml?account-id={{ profile.id|urlencoded }}">here</a></li>
+        <li>your tag scores can be found <a href="/profile/tags">here</a></li>
+        <li>you can upload a theme <a href="/post-style">here</a> (you must be logged in)</li>
+      </ul>
     </div>
-
-    <div>
-      <label for="theme-id">the id of a theme (leave empty to disable):</label>
-      {% match style_id.0 %}
-        {% when Some with (style_id) %}
-          <input type="text" id="new-style-id" name="new-style-id" value="{{ style_id }}" />
-        {% when None %}
-          <input type="text" id="new-style-id" name="new-style-id" value="" />
-      {% endmatch %}
-    </div>
-
-    <button>submit</button>
-  </form>
-
-  <h2>miscellaneous</h2>
-
-  <ul>
-    <li>an rss feed is available <a href="/feed.xml?account-id={{ profile.id|urlencoded }}">here</a></li>
-    <li>your tag scores can be found <a href="/profile/tags">here</a></li>
-    <li>you can upload a theme <a href="/post-style">here</a> (you must be logged in)</li>
-  </ul>
+  </div>
 {% endblock %}
