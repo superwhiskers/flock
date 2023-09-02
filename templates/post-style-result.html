@@ -6,9 +6,11 @@
 {% block body %}
   <h1>confirmation of theme submission</h1>
 
-  you've successfully uploaded a theme. <span class="explanation">it can be used by setting
-  the theme id on the <a href="/profile">profile page</a> to the theme id
-  <span class="style-id id">{{ created_style_id }}</span>. it is also possible to test its
-  appearance on the index with
-  <a href="/?style={{ created_style_id|urlencoded }}">this link</a>.</span>
+  <p>
+    you've successfully uploaded a theme. <span class="explanation">it can be used by setting
+    the theme id on the <a href="/profile">profile page</a> to the theme id
+    <span class="style-id id">{{ created_style_id }}</span>. it is also possible to test its
+    appearance on the index with
+    <a href="/?style={{ created_style_id|urlencoded }}">this link</a>.</span>
+  </p>
 {% endblock %}

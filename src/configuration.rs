@@ -229,6 +229,6 @@ fn default_feed_refresh_period() -> Duration {
 /// The default value for the `rating_period` field in the [`Algorithm`] configuration section
 #[inline(always)]
 fn default_rating_period() -> usize {
-    // 10 links
-    10
+    // 5 links
+    5
 }
